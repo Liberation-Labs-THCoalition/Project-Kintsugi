@@ -13,10 +13,6 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
-    defaults:
-      run:
-        working-directory: kintsugi-cma
-
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('kintsugi-cma/requirements-test.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements-test.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
 
@@ -52,4 +48,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: kintsugi-cma/coverage.xml
+          path: coverage.xml
