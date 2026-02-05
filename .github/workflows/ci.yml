@@ -16,7 +16,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run security tests
         run: pytest tests/test_security_*.py -v --tb=short
 
@@ -29,7 +31,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run memory tests
         run: pytest tests/test_memory_*.py -v --tb=short
 
@@ -42,7 +46,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run config tests
         run: pytest tests/test_config_*.py -v --tb=short
 
@@ -55,7 +61,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run engine and BDI tests
         run: |
           pytest tests/test_shadow_fork.py tests/test_verifier.py tests/test_promoter.py \
@@ -71,7 +79,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run adapter tests
         run: pytest tests/test_adapters_*.py -v --tb=short
 
@@ -84,7 +94,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run skills tests
         run: pytest tests/test_skills_*.py -v --tb=short
 
@@ -97,7 +109,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: |
+          pip install -r requirements-test.txt
+          pip install -e .
       - name: Run core tests
         run: |
           pytest tests/test_cognition_*.py tests/test_governance_*.py \
