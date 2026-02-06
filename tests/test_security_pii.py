@@ -341,16 +341,17 @@ class TestPIIRedactorExtraPatterns:
 
     def test_extra_patterns_extend_detection(self):
         """Extra patterns add new PII types."""
+        # Use fake prefix to avoid GitHub secret scanning (not a real API key format)
         extra = [
             {
                 "type": "API_KEY",
-                "regex": re.compile(r"sk_live_[a-zA-Z0-9]{24}"),
+                "regex": re.compile(r"fake_key_[a-zA-Z0-9]{24}"),
                 "validator": None,
             }
         ]
         redactor = PIIRedactor(extra_patterns=extra)
 
-        text = "API Key: sk_live_000000000000TESTONLY00"  # Fixed: exactly 24 chars, obviously fake
+        text = "API Key: fake_key_000000000000TESTONLYXX00"  # exactly 24 chars after fake_key_
         detections = redactor.detect(text)
 
         api_key_detections = [d for d in detections if d.pii_type == "API_KEY"]
