@@ -1,9 +1,11 @@
 # Kintsugi Harness — Implementation Plan
 ## Liberation Labs | February 2026
 
-> Reference: `KINTSUGI_HARNESS_v1.1.md`
+> Reference: `ARCHITECTURE.md` (v1.1 specification)
 > Specialist Agents: `Project-Agent-Army` (14 agents)
 > Total Components: 115+
+>
+> **Status: All 5 phases complete.** ~77,000 lines Python, 600+ tests, 22 Skill Chips operational.
 
 ---
 
@@ -814,51 +816,53 @@ volumes:
 
 ## Definition of Done (Per Phase)
 
-### Phase 1
-- [ ] `docker compose up` starts full stack
-- [ ] POST /api/agent/message returns agent response
-- [ ] Intent Capsule signs and verifies mandates
-- [ ] Shield Module blocks budget/egress violations
-- [ ] SecurityMonitor blocks suspicious shell patterns
-- [ ] CMA Stage 1 compresses dialogue to atomic facts
-- [ ] Cold archive retains sub-threshold windows
-- [ ] Temporal Memory logs all decisions
-- [ ] VALUES.json loads from template, validates, hot-reloads
-- [ ] Test coverage >80% on engine/, >90% on security/
-- [ ] CI pipeline green (lint + type check + test + security scan + Docker build)
+**All phases complete as of February 2026.**
 
-### Phase 2
-- [ ] Orchestrator routes requests to correct Skill Chip domain
-- [ ] CMA full pipeline: Stage 1 → 2 (consolidation) → 3 (retrieval) returns relevant memories
-- [ ] MCP Tool Spans connect to at least Slack + one CRM
-- [ ] OTel traces visible in configured backend
-- [ ] Consensus Gate: submit action → approve in Dashboard → action executes
-- [ ] Setup Wizard: new org goes from zero to first agent interaction
-- [ ] BDI Editor: create/edit/view beliefs, desires, intentions with revision history
-- [ ] Test coverage >80% overall, E2E tests pass
+### Phase 1 ✓
+- [x] `docker compose up` starts full stack
+- [x] POST /api/agent/message returns agent response
+- [x] Intent Capsule signs and verifies mandates
+- [x] Shield Module blocks budget/egress violations
+- [x] SecurityMonitor blocks suspicious shell patterns
+- [x] CMA Stage 1 compresses dialogue to atomic facts
+- [x] Cold archive retains sub-threshold windows
+- [x] Temporal Memory logs all decisions
+- [x] VALUES.json loads from template, validates, hot-reloads
+- [x] Test coverage >80% on engine/, >90% on security/
+- [x] CI pipeline green (lint + type check + test + security scan + Docker build)
 
-### Phase 3
-- [ ] Shadow Fork: modification proposed → shadow runs in parallel → outputs captured
-- [ ] Verifier: produces APPROVE/REJECT/EXTEND/ESCALATE with rationale
-- [ ] Formal invariants: code-checked constraints override Verifier
-- [ ] Promotion: approved modification → Primary config updated → golden trace logged
-- [ ] Rollback: one-click revert from Kintsugi Timeline
-- [ ] Evolutionary Pipeline: shadow proposals logged → picked up next cycle
-- [ ] Bloom: adversarial scenarios generated → run → scored per BDI layer
-- [ ] Mission Drift: BDI divergence detected → Dashboard invitation surfaced
-- [ ] Calibration: historical replay produces consistency metrics
-- [ ] Adversarial tests pass (Red Hat Tester + Security Hardener)
+### Phase 2 ✓
+- [x] Orchestrator routes requests to correct Skill Chip domain
+- [x] CMA full pipeline: Stage 1 → 2 (consolidation) → 3 (retrieval) returns relevant memories
+- [x] MCP Tool Spans connect to at least Slack + one CRM
+- [x] OTel traces visible in configured backend
+- [x] Consensus Gate: submit action → approve in Dashboard → action executes
+- [x] Setup Wizard: new org goes from zero to first agent interaction
+- [x] BDI Editor: create/edit/view beliefs, desires, intentions with revision history
+- [x] Test coverage >80% overall, E2E tests pass
 
-### Phase 4
-- [ ] 6 core Skill Chips operational (4a)
-- [ ] Slack and Discord bots functional with DM pairing
-- [ ] Web chat widget embeddable
-- [ ] Grant Hunter returns BDI-filtered grants from Grants.gov
-- [ ] Volunteer Coordinator matches needs to offers within geographic radius
-- [ ] Finance Assistant connects to at least one accounting platform
+### Phase 3 ✓
+- [x] Shadow Fork: modification proposed → shadow runs in parallel → outputs captured
+- [x] Verifier: produces APPROVE/REJECT/EXTEND/ESCALATE with rationale
+- [x] Formal invariants: code-checked constraints override Verifier
+- [x] Promotion: approved modification → Primary config updated → golden trace logged
+- [x] Rollback: one-click revert from Kintsugi Timeline
+- [x] Evolutionary Pipeline: shadow proposals logged → picked up next cycle
+- [x] Bloom: adversarial scenarios generated → run → scored per BDI layer
+- [x] Mission Drift: BDI divergence detected → Dashboard invitation surfaced
+- [x] Calibration: historical replay produces consistency metrics
+- [x] Adversarial tests pass (Red Hat Tester + Security Hardener)
 
-### Phase 5
-- [ ] Multi-tenant: two orgs running on same instance, fully isolated
-- [ ] Plugin SDK: external developer can build and install a custom Skill Chip
-- [ ] Documentation: org can self-onboard from docs alone
-- [ ] `kintsugi security audit --deep` produces actionable report
+### Phase 4 ✓
+- [x] 22 Skill Chips operational (4a, 4b, 4c complete)
+- [x] Slack and Discord bots functional with DM pairing
+- [x] Web chat widget embeddable
+- [x] Grant Hunter returns BDI-filtered grants from Grants.gov
+- [x] Volunteer Coordinator matches needs to offers within geographic radius
+- [x] Finance Assistant connects to at least one accounting platform
+
+### Phase 5 ✓
+- [x] Multi-tenant: two orgs running on same instance, fully isolated
+- [x] Plugin SDK: external developer can build and install a custom Skill Chip
+- [x] Documentation: org can self-onboard from docs alone
+- [x] `kintsugi security audit --deep` produces actionable report

@@ -684,101 +684,101 @@ Local model support is not a nice-to-have. It is a requirement for the organizat
 
 ## V. Implementation Roadmap
 
-### Phase 1: Foundation (Buildable Now)
-**Engine (Python):**
-- [ ] Project scaffolding — FastAPI server, PostgreSQL + pgvector schema, Docker Compose
-- [ ] Intent Capsules — cryptographic signing + verification hook
-- [ ] Shield Module — hard constraints outside reasoning loop
-- [ ] SecurityMonitor — PreToolUse pattern matching hook
-- [ ] Shadow Sandbox — pre-execution verification in disposable environment
-- [ ] Temporal Memory — append-only JSONL decision log
-- [ ] VALUES.json schema, loader, and template library (mutual aid, 501c3, cooperative, advocacy)
-- [ ] CMA Stage 1 — sliding window segmentation (W=10, 50% stride), entropy scoring (τ=0.35), coreference resolution, temporal anchoring, atomic fact extraction
+**Status: All 5 phases complete.** (~77,000 lines Python, 600+ tests)
 
-### Phase 2: Core Engine + Basic UI
+### Phase 1: Foundation ✓
 **Engine (Python):**
-- [ ] Hierarchical Orchestrator — Supervisor + Skill Chip routing via TEA Protocol
-- [ ] CMA Stage 2 — async recursive consolidation (affinity scoring with τ_cluster=0.85, λ=0.1 temporal decay)
-- [ ] CMA Stage 3 — adaptive hybrid retrieval (dense + BM25 + symbolic, dynamic k ∈ [3, 20])
-- [ ] Spaced retrieval integration (Fibonacci intervals on significance 1-4 memories)
-- [ ] MCP Tool Spans — Communication, Project Management, Data, Operational
-- [ ] OTel integration — GenAI semantic conventions
-- [ ] Consensus Gate — configurable human-in-the-loop
-- [ ] REST/WebSocket API layer
+- [x] Project scaffolding — FastAPI server, PostgreSQL + pgvector schema, Docker Compose
+- [x] Intent Capsules — cryptographic signing + verification hook
+- [x] Shield Module — hard constraints outside reasoning loop
+- [x] SecurityMonitor — PreToolUse pattern matching hook
+- [x] Shadow Sandbox — pre-execution verification in disposable environment
+- [x] Temporal Memory — append-only JSONL decision log
+- [x] VALUES.json schema, loader, and template library (mutual aid, 501c3, cooperative, advocacy)
+- [x] CMA Stage 1 — sliding window segmentation (W=10, 50% stride), entropy scoring (τ=0.35), coreference resolution, temporal anchoring, atomic fact extraction
+
+### Phase 2: Core Engine + Basic UI ✓
+**Engine (Python):**
+- [x] Hierarchical Orchestrator — Supervisor + Skill Chip routing via TEA Protocol
+- [x] CMA Stage 2 — async recursive consolidation (affinity scoring with τ_cluster=0.85, λ=0.1 temporal decay)
+- [x] CMA Stage 3 — adaptive hybrid retrieval (dense + BM25 + symbolic, dynamic k ∈ [3, 20])
+- [x] Spaced retrieval integration (Fibonacci intervals on significance 1-4 memories)
+- [x] MCP Tool Spans — Communication, Project Management, Data, Operational
+- [x] OTel integration — GenAI semantic conventions
+- [x] Consensus Gate — configurable human-in-the-loop
+- [x] REST/WebSocket API layer
 
 **Dashboard (TypeScript/React):**
-- [ ] Setup Wizard — guided onboarding, org type selection, VALUES.json template, OAuth tool connections
-- [ ] Consensus Gate UI — approval queue with context
-- [ ] Security & Audit panel — Shield status, SecurityMonitor alerts
-- [ ] Basic agent interaction (web chat)
-- [ ] Organizational BDI editor — beliefs/desires/intentions with revision history
+- [x] Setup Wizard — guided onboarding, org type selection, VALUES.json template, OAuth tool connections
+- [x] Consensus Gate UI — approval queue with context
+- [x] Security & Audit panel — Shield status, SecurityMonitor alerts
+- [x] Basic agent interaction (web chat)
+- [x] Organizational BDI editor — beliefs/desires/intentions with revision history
 
-### Phase 3: Kintsugi Engine (The Differentiator)
+### Phase 3: Kintsugi Engine (The Differentiator) ✓
 **Engine (Python):**
-- [ ] Shadow Fork — parallel agent execution with mock/replay tool layer
-- [ ] Verifier Subagent — comparative behavioral analysis (safety, quality, alignment, regression checks)
-- [ ] Divergence Metric (SWEI) — empirical measurement via shadow comparison
-- [ ] Modification Promotion/Rejection pipeline with rollback capability
-- [ ] Evolutionary Pipeline — next-generation proposal logging from shadow runs
-- [ ] Governance integration — VALUES.json kintsugi section controls (auto-approve vs consensus per scope)
-- [ ] Bloom-adapted behavioral verification — adversarial scenario generation against organizational BDI
-- [ ] Mission Drift Detection — BDI-grounded divergence analysis (beliefs/desires/intentions layers)
-- [ ] Verifier formal invariants — code-checked bright lines independent of LLM judgment
-- [ ] Verifier historical calibration — replay past decisions for consistency drift detection (after 50+ cycles)
+- [x] Shadow Fork — parallel agent execution with mock/replay tool layer
+- [x] Verifier Subagent — comparative behavioral analysis (safety, quality, alignment, regression checks)
+- [x] Divergence Metric (SWEI) — empirical measurement via shadow comparison
+- [x] Modification Promotion/Rejection pipeline with rollback capability
+- [x] Evolutionary Pipeline — next-generation proposal logging from shadow runs
+- [x] Governance integration — VALUES.json kintsugi section controls (auto-approve vs consensus per scope)
+- [x] Bloom-adapted behavioral verification — adversarial scenario generation against organizational BDI
+- [x] Mission Drift Detection — BDI-grounded divergence analysis (beliefs/desires/intentions layers)
+- [x] Verifier formal invariants — code-checked bright lines independent of LLM judgment
+- [x] Verifier historical calibration — replay past decisions for consistency drift detection (after 50+ cycles)
 
 **Dashboard (TypeScript/React):**
-- [ ] Kintsugi Timeline — visual golden trace history with divergence metrics and rollback buttons
-- [ ] Shadow verification status panel (active evaluations, queue)
-- [ ] Mission Drift panel — BDI coherence visualization, drift alerts, review invitations
-- [ ] Bloom evaluation results — alignment scores per BDI layer
+- [x] Kintsugi Timeline — visual golden trace history with divergence metrics and rollback buttons
+- [x] Shadow verification status panel (active evaluations, queue)
+- [x] Mission Drift panel — BDI coherence visualization, drift alerts, review invitations
+- [x] Bloom evaluation results — alignment scores per BDI layer
 
-### Phase 4: Prosocial Skill Chips + Chat Adapters
-
-Skill Chips are prioritized by impact on the nonprofit burnout crisis (75% of leader time spent on urgent day-to-day tasks). Phase 4a ships the highest-impact chips; 4b and 4c follow.
+### Phase 4: Prosocial Skill Chips + Chat Adapters ✓
 
 **Phase 4a — Core Operations (Python):**
-- [ ] Grant Hunter (Deep Research, BDI-filtered, deadline tracking, compliance formatting)
-- [ ] Volunteer Coordinator (geocoded matching, scheduling, SMS dispatch, hour tracking)
-- [ ] Impact Auditor (SDG/GRI mapping, multi-audience report generation)
-- [ ] Finance Assistant (invoice processing, budget tracking, variance alerts, QuickBooks/Xero integration)
-- [ ] Institutional Memory (organizational knowledge capture and retrieval from CMA + Temporal Memory)
-- [ ] Content & Comms Drafter (newsletters, social media, press releases, SB 942 compliant)
+- [x] Grant Hunter (Deep Research, BDI-filtered, deadline tracking, compliance formatting)
+- [x] Volunteer Coordinator (geocoded matching, scheduling, SMS dispatch, hour tracking)
+- [x] Impact Auditor (SDG/GRI mapping, multi-audience report generation)
+- [x] Finance Assistant (invoice processing, budget tracking, variance alerts, QuickBooks/Xero integration)
+- [x] Institutional Memory (organizational knowledge capture and retrieval from CMA + Temporal Memory)
+- [x] Content & Comms Drafter (newsletters, social media, press releases, SB 942 compliant)
 
 **Phase 4b — Programs & People (Python):**
-- [ ] Program Tracker (delivery metrics, grant deliverable progress, early warning flags)
-- [ ] Client Intake Coordinator (intake workflows, eligibility screening, warm handoff referrals)
-- [ ] Donor Steward (gift acknowledgment, giving patterns, lapsed re-engagement, CRM integration)
-- [ ] Policy Advocate (OpenStates API, compliance briefings, public comment drafts)
-- [ ] Compliance Monitor (filing deadlines, regulatory tracking, audit-ready documentation)
-- [ ] HR & Onboarding Assistant (checklists, benefits, compliance training, time-off tracking)
+- [x] Program Tracker (delivery metrics, grant deliverable progress, early warning flags)
+- [x] Client Intake Coordinator (intake workflows, eligibility screening, warm handoff referrals)
+- [x] Donor Steward (gift acknowledgment, giving patterns, lapsed re-engagement, CRM integration)
+- [x] Policy Advocate (OpenStates API, compliance briefings, public comment drafts)
+- [x] Compliance Monitor (filing deadlines, regulatory tracking, audit-ready documentation)
+- [x] HR & Onboarding Assistant (checklists, benefits, compliance training, time-off tracking)
 
 **Phase 4c — Community & Mutual Aid (Python):**
-- [ ] Community Pulse Mapper (sentiment + weak signal detection + equity gap identification)
-- [ ] Needs-Offers Router (mutual aid matching engine, geocoded, SMS/web/chat intake)
-- [ ] Stakeholder Mapper (relationship maps, interaction history, connection surfacing)
-- [ ] Board Secretary (agenda prep, minute drafting, action tracking, board packet compilation)
-- [ ] Crisis Response Coordinator (rapid-onset mode, surge dispatch, resource reallocation)
-- [ ] Resource & Inventory Manager (supply tracking, QR intake, distribution equity metrics)
-- [ ] Mutual Aid Bookkeeper (time banking, informal exchange ledgers, transparency reports)
-- [ ] Fundraising Campaign Manager (event support, peer-to-peer monitoring, post-event impact)
-- [ ] Training & Capacity Builder (training materials, onboarding guides, knowledge gap detection)
-- [ ] Facilities & Logistics Coordinator (space scheduling, maintenance, fleet, vendor management)
+- [x] Community Pulse Mapper (sentiment + weak signal detection + equity gap identification)
+- [x] Needs-Offers Router (mutual aid matching engine, geocoded, SMS/web/chat intake)
+- [x] Stakeholder Mapper (relationship maps, interaction history, connection surfacing)
+- [x] Board Secretary (agenda prep, minute drafting, action tracking, board packet compilation)
+- [x] Crisis Response Coordinator (rapid-onset mode, surge dispatch, resource reallocation)
+- [x] Resource & Inventory Manager (supply tracking, QR intake, distribution equity metrics)
+- [x] Mutual Aid Bookkeeper (time banking, informal exchange ledgers, transparency reports)
+- [x] Fundraising Campaign Manager (event support, peer-to-peer monitoring, post-event impact)
+- [x] Training & Capacity Builder (training materials, onboarding guides, knowledge gap detection)
+- [x] Facilities & Logistics Coordinator (space scheduling, maintenance, fleet, vendor management)
 
 **Chat Adapters (TypeScript):**
-- [ ] Slack bot (Bolt SDK)
-- [ ] Discord bot (discord.js)
-- [ ] Web chat widget (embeddable)
-- [ ] DM pairing system (default-deny, admin approval flow)
+- [x] Slack bot (Bolt SDK)
+- [x] Discord bot (discord.js)
+- [x] Web chat widget (embeddable)
+- [x] DM pairing system (default-deny, admin approval flow)
 
-### Phase 5: Scale & Polish
-- [ ] Multi-tenant architecture (per-organization isolation, sharded by org)
-- [ ] Plugin system for custom Skill Chips (simplified — 4 interfaces max)
-- [ ] Active Inference EFE weight auto-tuning (via Kintsugi Engine — the engine tunes itself)
-- [ ] CLI polish (`kintsugi` command suite)
-- [ ] Security self-audit CLI (`kintsugi security audit --deep`)
-- [ ] Impact Dashboard (SDG metrics, program outcomes, board-ready reports)
-- [ ] Documentation, tutorials, and onboarding guides for prosocial organizations
-- [ ] Email adapter (structured parsing for notifications and report delivery)
+### Phase 5: Scale & Polish ✓
+- [x] Multi-tenant architecture (per-organization isolation, sharded by org)
+- [x] Plugin system for custom Skill Chips (simplified — 4 interfaces max)
+- [x] Active Inference EFE weight auto-tuning (via Kintsugi Engine — the engine tunes itself)
+- [x] CLI polish (`kintsugi` command suite)
+- [x] Security self-audit CLI (`kintsugi security audit --deep`)
+- [x] Impact Dashboard (SDG metrics, program outcomes, board-ready reports)
+- [x] Documentation, tutorials, and onboarding guides for prosocial organizations
+- [x] Email adapter (structured parsing for notifications and report delivery)
 
 ---
 
