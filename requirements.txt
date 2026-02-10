@@ -9,5 +9,6 @@ scipy>=1.11
 numpy>=1.26
 sentence-transformers>=2.2
 openai>=1.6
+anthropic>=0.40.0
 redis>=5.0
 watchdog>=3.0

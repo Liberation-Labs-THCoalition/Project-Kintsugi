@@ -1,7 +1,8 @@
-"""Agent message endpoint — Phase 1 security + memory pipeline."""
+"""Agent message endpoint — Phase 2 with LLM integration."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -15,11 +16,48 @@ from kintsugi.db import get_session
 from kintsugi.models.base import Organization, TemporalMemory
 from kintsugi.security.monitor import SecurityMonitor
 from kintsugi.security.pii import PIIRedactor
+from kintsugi.cognition.orchestrator import Orchestrator, OrchestratorConfig
+from kintsugi.cognition.model_router import ModelRouter
+from kintsugi.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 _monitor = SecurityMonitor()
 _redactor = PIIRedactor()
+
+# LLM client - lazy initialization to handle missing API key gracefully
+_llm_client = None
+_orchestrator = None
+
+
+def _get_orchestrator() -> Orchestrator:
+    """Get or create the Orchestrator with LLM classifier."""
+    global _llm_client, _orchestrator
+
+    if _orchestrator is not None:
+        return _orchestrator
+
+    llm_classifier = None
+
+    # Only initialize LLM if API key is configured
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            from kintsugi.cognition.llm_client import create_llm_client
+            _llm_client = create_llm_client()
+            llm_classifier = _llm_client.classify_intent
+            logger.info("LLM classifier initialized with Anthropic API")
+        except Exception as e:
+            logger.warning("Failed to initialize LLM client: %s", e)
+
+    _orchestrator = Orchestrator(
+        config=OrchestratorConfig(),
+        model_router=ModelRouter(deployment_tier=settings.DEPLOYMENT_TIER),
+        llm_classifier=llm_classifier,
+    )
+
+    return _orchestrator
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +150,57 @@ async def agent_message(
             temporal_event_id=str(event.id),
         )
 
-    # ALLOW or WARN
+    # ALLOW or WARN - proceed with LLM processing
+    warning_note = ""
+    if verdict_str == "warn":
+        warning_note = f" Warning: {verdict.reason}"
+
+    # Route the message
+    orchestrator = _get_orchestrator()
+    routing = await orchestrator.route(req.message, req.org_id, req.context)
+
+    # Generate response using LLM
+    response_text = f"[Routed to: {routing.skill_domain}]"
+
+    if _llm_client is not None:
+        try:
+            # System prompt with routing context
+            system = f"""You are a helpful AI assistant for nonprofit organizations.
+The user's message has been classified as relating to: {routing.skill_domain}
+Confidence: {routing.confidence:.0%}
+
+Provide a helpful, concise response. If the request relates to grants or funding,
+provide actionable guidance. If you need more information, ask clarifying questions."""
+
+            llm_response = await _llm_client.complete(
+                req.message,
+                tier=routing.model_tier,
+                system=system,
+                max_tokens=1024,
+            )
+            response_text = llm_response.text + warning_note
+
+            # Log token usage
+            logger.info(
+                "LLM response generated: %d input, %d output tokens, $%.4f",
+                llm_response.input_tokens,
+                llm_response.output_tokens,
+                llm_response.cost_usd,
+            )
+        except Exception as e:
+            logger.error("LLM generation failed: %s", e)
+            response_text = (
+                f"Message routed to {routing.skill_domain} domain. "
+                f"LLM generation failed: {e}{warning_note}"
+            )
+    else:
+        response_text = (
+            f"Message routed to {routing.skill_domain} domain "
+            f"(confidence: {routing.confidence:.0%}). "
+            f"No LLM API key configured - set ANTHROPIC_API_KEY.{warning_note}"
+        )
+
+    # Log to temporal memory
     event = TemporalMemory(
         org_id=org_uuid,
         category="interaction",
@@ -122,20 +210,16 @@ async def agent_message(
             "security_reason": verdict.reason,
             "context": req.context,
             "pii_types_found": redaction.types_found,
+            "routing_domain": routing.skill_domain,
+            "routing_confidence": routing.confidence,
+            "routing_reasoning": routing.reasoning,
         },
     )
     session.add(event)
     await session.flush()
 
-    warning_note = ""
-    if verdict_str == "warn":
-        warning_note = f" Warning: {verdict.reason}"
-
     return AgentResponse(
-        response=(
-            "Message processed through security pipeline. "
-            f"LLM integration pending (Phase 2).{warning_note}"
-        ),
+        response=response_text,
         org_id=req.org_id,
         security_verdict=verdict_str,
         redacted_input=redacted_text,
