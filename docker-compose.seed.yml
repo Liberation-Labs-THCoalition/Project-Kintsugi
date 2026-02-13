@@ -11,7 +11,7 @@
 
 services:
   engine:
-    build: ./engine
+    build: .
     ports:
       - "8000:8000"
     environment:

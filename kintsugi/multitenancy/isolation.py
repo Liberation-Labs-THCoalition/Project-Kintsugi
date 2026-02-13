@@ -597,6 +597,33 @@ class TenantIsolator:
         logger.info(f"Isolation verified for {tenant_id}")
         return True
 
+    def apply_tenant_filter(self, query: Any, model: Any, tenant_id: str) -> Any:
+        """Apply tenant filtering to a SQLAlchemy query using ORM models.
+
+        For ROW_LEVEL isolation, adds a ``.where(model.org_id == tenant_id)``
+        clause.  For SCHEMA isolation, the schema search_path handles it
+        (filter is a no-op).  For DATABASE isolation, the connection
+        itself provides isolation (filter is a no-op).
+
+        Args:
+            query:     A SQLAlchemy ``select()`` or ORM query.
+            model:     The ORM model class (must have ``org_id``).
+            tenant_id: The tenant to scope the query to.
+
+        Returns:
+            The filtered query.
+
+        Note:
+            SCHEMA and DATABASE isolation are documented but not yet
+            implemented at the query level.  They require infrastructure
+            automation for schema/database provisioning.
+        """
+        self._validate_tenant_id(tenant_id)
+        if self._strategy == IsolationStrategy.ROW_LEVEL:
+            if hasattr(model, "org_id"):
+                return query.where(model.org_id == tenant_id)
+        return query
+
     def __repr__(self) -> str:
         return (
             f"<TenantIsolator strategy={self._strategy.value} "
