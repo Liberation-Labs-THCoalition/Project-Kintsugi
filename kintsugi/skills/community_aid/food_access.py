@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Food Access
+
+Domain: MUTUAL_AID
+Spans: pantry_network, snap_eligibility, meal_scheduler, inventory_system
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Coordinates food pantries, SNAP assistance, and community meals for food-insecure members.
+
 Food Access skill chip for Kintsugi CMA.
 
 Coordinates food pantries, SNAP (food stamps) assistance, and community

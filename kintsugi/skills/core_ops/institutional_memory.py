@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Institutional Memory
+
+Domain: OPERATIONS
+Spans: cma_query, temporal_log, embedding_search
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Queries and maintains organizational knowledge using CMA and temporal memory systems.
+
 Institutional Memory Skill Chip for Kintsugi CMA.
 
 This chip queries and maintains organizational knowledge using the Cognitive

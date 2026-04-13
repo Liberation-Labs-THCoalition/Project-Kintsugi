@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Crisis Response
+
+Domain: MUTUAL_AID
+Spans: alert_system, volunteer_dispatch, resource_inventory, emergency_contacts
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Handles rapid mobilization for emergencies with tiered escalation based on crisis severity.
+
 Crisis Response Skill Chip for Kintsugi CMA.
 
 Handles rapid mobilization for emergencies, disasters, and urgent community

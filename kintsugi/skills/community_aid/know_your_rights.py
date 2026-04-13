@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Know Your Rights
+
+Domain: ADVOCACY
+Spans: legal_database, clinic_scheduler, translation_api
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Provides multi-language legal information, rights education, and clinic scheduling.
+
 Know Your Rights skill chip for Kintsugi CMA.
 
 Provides legal information, rights education, and clinic scheduling

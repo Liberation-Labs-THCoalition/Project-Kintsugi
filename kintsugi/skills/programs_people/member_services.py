@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Member Services
+
+Domain: MEMBER_SERVICES
+Spans: membership_db, payment_processor, email_service
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Manages membership tracking, renewals, benefits, and member communications.
+
 Member Services Skill Chip for Kintsugi CMA.
 
 Manages membership tracking, renewals, benefits, and communications.

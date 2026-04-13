@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Solidarity Economy
+
+Domain: COMMUNITY
+Spans: coop_registry, time_bank_ledger, cdfi_network, worker_owner_tools
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Supports cooperative development, time banking, and alternative economy initiatives.
+
 Solidarity Economy skill chip for Kintsugi CMA.
 
 Supports cooperative development, time banking, and alternative economy

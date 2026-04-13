@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Rapid Response
+
+Domain: ADVOCACY
+Spans: alert_network, bail_fund, legal_hotline, safe_location_db
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Coordinates rapid response networks for ICE raids, bail funds, and community emergencies.
+
 Rapid Response skill chip for Kintsugi CMA.
 
 Coordinates rapid response networks for ICE raids, bail funds, and

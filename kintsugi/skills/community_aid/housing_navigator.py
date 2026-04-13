@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Housing Navigator
+
+Domain: ADVOCACY
+Spans: housing_database, voucher_tracker, landlord_registry, hud_api
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Navigates housing resources, voucher programs, tenant rights, and eviction defense.
+
 Housing Navigator skill chip for Kintsugi CMA.
 
 Navigates housing resources, voucher programs, and tenant rights for

@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Impact Auditor
+
+Domain: PROGRAMS
+Spans: sdg_mapping, gri_standards, report_templates
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Tracks and reports organizational impact using UN SDG and GRI frameworks.
+
 Impact Auditor Skill Chip for Kintsugi CMA.
 
 This chip tracks, measures, and reports organizational impact using

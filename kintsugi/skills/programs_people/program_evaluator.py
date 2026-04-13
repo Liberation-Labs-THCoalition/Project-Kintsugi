@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Program Evaluator
+
+Domain: PROGRAMS
+Spans: logic_model_builder, survey_tools, data_viz
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Designs and tracks program logic models, outcomes measurement, and evaluation reporting.
+
 Program Evaluator Skill Chip for Kintsugi CMA.
 
 Provides capabilities for designing and tracking program logic models,

@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Coalition Builder
+
+Domain: COMMUNITY
+Spans: partner_directory, campaign_tools, shared_calendar
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Coordinates partner organizations, shared campaigns, and collective action for advocacy.
+
 Coalition Builder Skill Chip for Kintsugi CMA.
 
 Coordinates partner organizations, shared campaigns, and collective action

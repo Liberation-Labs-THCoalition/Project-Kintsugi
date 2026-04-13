@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Event Planner
+
+Domain: OPERATIONS
+Spans: calendar_api, rsvp_system, venue_booking, accessibility_checker
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Plans and coordinates events including RSVPs, logistics, and accessibility compliance.
+
 Event Planner Skill Chip for Kintsugi CMA.
 
 Plans and coordinates events including RSVPs, logistics, accessibility,

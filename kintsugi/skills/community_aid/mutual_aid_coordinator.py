@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Mutual Aid Coordinator
+
+Domain: MUTUAL_AID
+Spans: needs_database, offers_database, matching_engine, notification_service
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Matches community needs with offers and coordinates privacy-preserving mutual aid.
+
 Mutual Aid Coordinator Skill Chip for Kintsugi CMA.
 
 Matches community needs with offers, coordinates mutual aid requests,

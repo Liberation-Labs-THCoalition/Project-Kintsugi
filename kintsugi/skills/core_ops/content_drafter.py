@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Content Drafter
+
+Domain: COMMUNICATIONS
+Spans: template_engine, sb942_labeler, social_media_api
+EFE Profile: risk=0.4, ambiguity=0.2, epistemic=0.4
+Description: Drafts communications, reports, and content with SB 942 AI labeling compliance.
+
 Content Drafter Skill Chip for Kintsugi CMA.
 
 This chip drafts communications, reports, and content with SB 942 AI labeling

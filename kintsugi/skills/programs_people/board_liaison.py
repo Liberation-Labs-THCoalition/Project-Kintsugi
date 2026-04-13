@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Board Liaison
+
+Domain: GOVERNANCE
+Spans: document_templates, calendar_api, voting_system
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Supports board governance including meeting prep, minute drafting, and resolution tracking.
+
 Board Liaison Skill Chip for Kintsugi CMA.
 
 Supports board governance activities including meeting preparation, minute

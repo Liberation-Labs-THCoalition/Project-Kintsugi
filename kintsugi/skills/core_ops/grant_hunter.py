@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Grant Hunter
+
+Domain: FUNDRAISING
+Spans: grants_gov_api, candid_api, foundation_directory
+EFE Profile: risk=0.3, ambiguity=0.3, epistemic=0.4
+Description: Searches and matches grant opportunities from Grants.gov, Candid, and foundation directories.
+
 Grant Hunter Skill Chip for Kintsugi CMA.
 
 This chip searches and matches grant opportunities from Grants.gov, Candid,

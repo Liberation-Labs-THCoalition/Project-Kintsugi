@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Resource Redistribution
+
+Domain: MUTUAL_AID
+Spans: inventory_system, logistics_api, partner_network
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Coordinates surplus allocation, food rescue, and time-sensitive resource sharing.
+
 Resource Redistribution Skill Chip for Kintsugi CMA.
 
 Coordinates surplus allocation, food rescue, and resource sharing across

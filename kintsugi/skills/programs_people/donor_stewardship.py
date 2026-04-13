@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Donor Stewardship
+
+Domain: FUNDRAISING
+Spans: crm_api, email_service, gift_tracking
+EFE Profile: risk=0.3, ambiguity=0.3, epistemic=0.4
+Description: Manages donor relationships, acknowledgments, cultivation planning, and giving analysis.
+
 Donor Stewardship Skill Chip for Kintsugi CMA.
 
 Manages donor relationships including acknowledgments, cultivation planning,

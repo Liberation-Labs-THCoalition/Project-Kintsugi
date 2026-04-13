@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Volunteer Coordinator
+
+Domain: OPERATIONS
+Spans: twilio_sms, calendar_api, geocoding
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Coordinates volunteer scheduling, communications, and skill-to-need matching.
+
 Volunteer Coordinator Skill Chip for Kintsugi CMA.
 
 This chip coordinates volunteer scheduling, communications, and engagement

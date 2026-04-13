@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Finance Assistant
+
+Domain: FINANCE
+Spans: quickbooks_api, xero_api, wave_api, plaid_api
+EFE Profile: risk=0.6, ambiguity=0.3, epistemic=0.1
+Description: Handles financial management, budget tracking, and accounting integration for nonprofits.
+
 Finance Assistant Skill Chip for Kintsugi CMA.
 
 This chip handles financial management, budget tracking, and accounting

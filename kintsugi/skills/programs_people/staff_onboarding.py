@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Staff Onboarding
+
+Domain: OPERATIONS
+Spans: hris_api, training_lms, document_store
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Guides new staff through onboarding workflows, training assignments, and policy orientation.
+
 Staff Onboarding Skill Chip for Kintsugi CMA.
 
 Guides new staff through onboarding workflows including training assignments,

@@ -26,6 +26,11 @@ from kintsugi.cognition.efe import (
     FINANCE_WEIGHTS,
     GRANTS_WEIGHTS,
 )
+from kintsugi.cognition.fast_classifier import (
+    ClassificationStage,
+    FastClassifier,
+    FastClassifierConfig,
+)
 from kintsugi.cognition.model_router import ModelRouter, ModelTier
 
 logger = logging.getLogger(__name__)
@@ -150,6 +155,7 @@ class Orchestrator:
         model_router: ModelRouter | None = None,
         llm_classifier: Callable[..., Awaitable[tuple[str, float]]] | None = None,
         efe_calculator: EFECalculator | None = None,
+        fast_classifier: FastClassifier | None = None,
     ) -> None:
         self._config = config or OrchestratorConfig(
             routing_table=dict(_DEFAULT_ROUTING_TABLE),
@@ -159,6 +165,7 @@ class Orchestrator:
         self._model_router = model_router or ModelRouter()
         self._llm_classifier = llm_classifier
         self._efe = efe_calculator or EFECalculator()
+        self._fast = fast_classifier or FastClassifier()
 
     # -- public API ---------------------------------------------------------
 
@@ -180,6 +187,32 @@ class Orchestrator:
 
         efe_score: EFEScore | None = None
 
+        # Stage 1: Fast classifier pre-screening
+        fast_result = self._fast.classify(
+            message, domain, confidence, candidate_hits,
+        )
+
+        if fast_result.stage == ClassificationStage.FAST_DENY:
+            # Hard block — return with zero confidence so Shield catches it
+            tier = ModelTier.FAST
+            return RoutingDecision(
+                skill_domain="blocked",
+                confidence=0.0,
+                reasoning=fast_result.reason,
+                model_tier=tier,
+            )
+
+        if fast_result.stage == ClassificationStage.FAST_ALLOW:
+            # Auto-route — skip EFE entirely
+            tier = self._tier_for_domain(fast_result.domain or domain)
+            return RoutingDecision(
+                skill_domain=fast_result.domain or domain,
+                confidence=fast_result.confidence,
+                reasoning=fast_result.reason,
+                model_tier=tier,
+            )
+
+        # Stage 2: Full EFE evaluation (only for escalated requests)
         # Use EFE scoring when there are multiple candidate domains or low confidence
         if len(candidate_hits) > 1 or confidence < self._config.confidence_threshold:
             efe_score = self._score_candidates_with_efe(candidate_hits, confidence)
