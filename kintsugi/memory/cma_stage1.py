@@ -51,12 +51,25 @@ class Window:
 
 @dataclass
 class AtomicFact:
-    """An independent factual statement extracted from a window."""
+    """An independent factual statement extracted from a window.
+
+    The optional ``conditions`` dict carries caller-provided context
+    about the conditions under which this fact was produced: which
+    reading-stance was active at ingest, what crystallizations were
+    firing, who produced the knowledge, by what methodology. Stage 1
+    does not interpret conditions — it persists them alongside the
+    fact so that downstream consumers (Stage 2 consolidation, Stage 3
+    retrieval, or external crystallization layers) can use them.
+
+    A fact without its conditions-of-emergence may be a retrieval
+    error, not a successful retrieval — depending on the consumer.
+    """
 
     content: str
     source_window_idx: int
     timestamp: datetime
     entities: list[str] = field(default_factory=list)
+    conditions: dict | None = None
 
 
 @dataclass
@@ -278,6 +291,7 @@ async def run_stage1(
     window_size: int = 10,
     stride: int = 5,
     threshold: float = 0.35,
+    conditions: dict | None = None,
 ) -> Stage1Result:
     """Execute the complete CMA Stage 1 pipeline.
 
@@ -285,6 +299,20 @@ async def run_stage1(
     2. Score entropy for each window.
     3. Filter windows by entropy threshold.
     4. Normalize retained windows into atomic facts.
+
+    Args:
+        turns: Ordered list of conversation turns.
+        embedding_provider: Vector encoder for entropy scoring.
+        llm_call: Callable for generative steps (normalization, entity extraction).
+        window_size: Turns per window (default 10).
+        stride: Step between windows (default 5, 50% overlap).
+        threshold: Entropy floor for retention (default 0.35).
+        conditions: Optional caller-provided context to attach to every
+            extracted fact. Stage 1 does not interpret conditions — it
+            passes them through unchanged. Callers (e.g. a crystallization
+            layer) use this to record the reading-stance, methodology, or
+            configurational state active at ingest time. When ``None``,
+            facts are stored without conditions (backward-compatible).
 
     Returns:
         :class:`Stage1Result` with retained facts and archived windows.
@@ -307,6 +335,10 @@ async def run_stage1(
     all_facts: list[AtomicFact] = []
     for w in retained:
         facts = await normalize_window(w, llm_call)
+        # Attach conditions to every extracted fact if provided
+        if conditions is not None:
+            for fact in facts:
+                fact.conditions = dict(conditions)
         all_facts.extend(facts)
 
     logger.info(
