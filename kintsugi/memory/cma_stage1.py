@@ -70,6 +70,9 @@ class AtomicFact:
     timestamp: datetime
     entities: list[str] = field(default_factory=list)
     conditions: dict | None = None
+    kintsugi_ref: str | None = None  # Cross-system pointer for external consumers
+    # (e.g., Vera's ConfigurationSubstrate uses this to index into
+    # extracted_propositions without a heavier coordination layer)
 
 
 @dataclass
@@ -265,14 +268,20 @@ async def normalize_window(
             facts_data = [{"content": anchored, "entities": []}]
 
     atomic_facts: list[AtomicFact] = []
-    for item in facts_data:
+    for i, item in enumerate(facts_data):
         if isinstance(item, dict):
+            import hashlib
+            fact_content = item.get("content", str(item))
+            ref = hashlib.sha256(
+                f"{window.start_idx}:{i}:{fact_content[:100]}".encode()
+            ).hexdigest()[:16]
             atomic_facts.append(
                 AtomicFact(
-                    content=item.get("content", str(item)),
+                    content=fact_content,
                     source_window_idx=window.start_idx,
                     timestamp=reference_time,
                     entities=item.get("entities", []),
+                    kintsugi_ref=f"k1-{ref}",
                 )
             )
 
