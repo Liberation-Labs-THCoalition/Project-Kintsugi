@@ -26,6 +26,8 @@ from kintsugi.cognition.efe import (
     FINANCE_WEIGHTS,
     GRANTS_WEIGHTS,
 )
+from kintsugi.bdi.store import BDIStore
+from kintsugi.bdi.coherence import CoherenceChecker
 from kintsugi.cognition.fast_classifier import (
     ClassificationStage,
     FastClassifier,
@@ -166,6 +168,13 @@ class Orchestrator:
         self._llm_classifier = llm_classifier
         self._efe = efe_calculator or EFECalculator()
         self._fast = fast_classifier or FastClassifier()
+        # BDI state — populated by load_values_into_bdi() at startup
+        self._bdi_store: BDIStore | None = None
+        self._coherence_checker = CoherenceChecker()
+
+    def attach_bdi(self, store: BDIStore) -> None:
+        """Attach a populated BDI store for coherence-informed routing."""
+        self._bdi_store = store
 
     # -- public API ---------------------------------------------------------
 
@@ -276,6 +285,22 @@ class Orchestrator:
         """
         decision = await self.classify_request(message, org_context=context)
 
+        # BDI coherence check — flag if routing drifts from organizational values
+        if self._bdi_store is not None:
+            try:
+                snapshot = self._bdi_store.get_snapshot()
+                coherence = self._coherence_checker.check_coherence(snapshot)
+                decision._bdi_coherence = coherence.overall
+                if coherence.issues:
+                    decision._bdi_issues = list(coherence.issues)
+                if coherence.overall < 0.3:
+                    logger.warning(
+                        "BDI coherence low (%.2f) — routing may drift from values: %s",
+                        coherence.overall, coherence.issues[:2],
+                    )
+            except Exception:
+                pass
+
         # Build a dict suitable for temporal memory / audit trail.
         log_entry: dict[str, Any] = {
             "org_id": org_id,
@@ -287,6 +312,8 @@ class Orchestrator:
         }
         if decision.efe_score is not None:
             log_entry["efe_total"] = decision.efe_score.total
+        if hasattr(decision, '_bdi_coherence'):
+            log_entry["bdi_coherence"] = decision._bdi_coherence
         logger.info("Routing decision: %s", log_entry)
 
         return decision
