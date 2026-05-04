@@ -125,6 +125,7 @@ class Pulse:
         self._cycle_count = 0
         self._running = False
         self._history: list[CycleReport] = []
+        self._evolution_log: list[dict[str, Any]] = []
 
     def add_check(self, check: CheckFn) -> None:
         """Register a check function."""
@@ -223,6 +224,76 @@ class Pulse:
         self._running = False
         logger.info("Pulse [%s] stopped after %d cycles", self.name, self._cycle_count)
 
+    # ── Self-modification (the agent adjusts its own heartbeat) ──
+
+    def evolve_check(
+        self,
+        check: CheckFn,
+        reason: str,
+    ) -> None:
+        """Add a new check to the pulse. Logged and reported."""
+        self._checks.append(check)
+        self._log_evolution("add_check", check.__name__, reason)
+
+    def retire_check(
+        self,
+        check_name: str,
+        reason: str,
+    ) -> bool:
+        """Remove a check by name. Returns True if found and removed."""
+        for i, fn in enumerate(self._checks):
+            if fn.__name__ == check_name:
+                self._checks.pop(i)
+                self._log_evolution("retire_check", check_name, reason)
+                return True
+        return False
+
+    def evolve_action(
+        self,
+        trigger_name: str,
+        action: ActionFn,
+        reason: str,
+    ) -> None:
+        """Add or replace an action for a trigger. Logged and reported."""
+        was_replacement = trigger_name in self._actions
+        self._actions[trigger_name] = action
+        verb = "replace_action" if was_replacement else "add_action"
+        self._log_evolution(verb, trigger_name, reason)
+
+    def adjust_interval(
+        self,
+        new_interval: timedelta,
+        reason: str,
+    ) -> None:
+        """Change the heartbeat frequency. Logged and reported."""
+        old = self.interval
+        self.interval = new_interval
+        self._log_evolution(
+            "adjust_interval",
+            f"{old} → {new_interval}",
+            reason,
+        )
+
+    def _log_evolution(self, action: str, target: str, reason: str) -> None:
+        """Record a self-modification in the evolution log."""
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "cycle": self._cycle_count,
+            "action": action,
+            "target": target,
+            "reason": reason,
+        }
+        self._evolution_log.append(entry)
+        logger.info(
+            "Pulse [%s] EVOLVED: %s '%s' — %s",
+            self.name, action, target, reason,
+        )
+
+    @property
+    def evolution_log(self) -> list[dict[str, Any]]:
+        """Full history of self-modifications for audit."""
+        return list(self._evolution_log)
+
     @property
     def cycle_count(self) -> int:
         return self._cycle_count
@@ -238,6 +309,37 @@ class Pulse:
     @property
     def last_report(self) -> CycleReport | None:
         return self._history[-1] if self._history else None
+
+
+    def introspect(self) -> dict[str, Any]:
+        """Self-report: what is my heartbeat doing?
+
+        Returns a summary an agent or LLM can reason about to decide
+        whether to evolve the pulse.
+        """
+        recent = self._history[-10:] if self._history else []
+        trigger_counts: dict[str, int] = {}
+        for report in recent:
+            for check in report.check_results:
+                if check.triggered:
+                    trigger_counts[check.name] = trigger_counts.get(check.name, 0) + 1
+
+        quiet_checks = [
+            fn.__name__ for fn in self._checks
+            if fn.__name__ not in trigger_counts
+        ] if recent else []
+
+        return {
+            "name": self.name,
+            "interval_seconds": self.interval.total_seconds(),
+            "checks": [fn.__name__ for fn in self._checks],
+            "actions": list(self._actions.keys()),
+            "total_cycles": self._cycle_count,
+            "recent_trigger_counts": trigger_counts,
+            "quiet_checks": quiet_checks,
+            "evolution_count": len(self._evolution_log),
+            "recent_evolutions": self._evolution_log[-5:],
+        }
 
 
 # ── Pre-built check patterns ──
