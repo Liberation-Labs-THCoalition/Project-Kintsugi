@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Optional
 
 
 class SkillDomain(str, Enum):
@@ -263,6 +263,100 @@ class SkillCapability(str, Enum):
     GENERATE_REPORTS = "generate_reports"
 
 
+@dataclass
+class ActivationCondition:
+    """Predicate that determines when a Program Function fires.
+
+    An activation condition inspects the current state (context, recent
+    outputs, BDI beliefs) and returns True when the intervention should
+    trigger. Conditions can match on specific failure patterns, state
+    thresholds, or domain events.
+
+    Attributes:
+        name: Identifier for this condition
+        description: Human-readable description of when this fires
+        predicate: Callable that takes (context, state_snapshot) and returns bool
+        priority: Higher priority conditions are evaluated first (default 0)
+        cooldown_seconds: Minimum time between activations (prevents loops)
+    """
+    name: str
+    description: str
+    predicate: Callable[[SkillContext, dict[str, Any]], bool]
+    priority: int = 0
+    cooldown_seconds: float = 0.0
+
+
+@dataclass
+class InterventionAction:
+    """Action taken when an ActivationCondition fires.
+
+    An intervention modifies the next action, injects corrective context,
+    or redirects the execution path. It does NOT replace the skill's
+    normal handle method — it augments it.
+
+    Attributes:
+        name: Identifier for this action
+        description: Human-readable description of what this does
+        action: Callable that takes (request, context, state_snapshot) and returns
+                a modified SkillRequest or SkillResponse
+        modifies_request: If True, the action returns a modified SkillRequest
+                         that replaces the original. If False, it returns a
+                         SkillResponse that short-circuits execution.
+    """
+    name: str
+    description: str
+    action: Callable[..., Any]
+    modifies_request: bool = True
+
+
+@dataclass
+class ProgramFunction:
+    """A state-action intervention function.
+
+    Program Functions are the proactive complement to a skill's handle method.
+    While handle responds to explicit user requests, Program Functions fire
+    when the system detects a state that warrants intervention — a failure
+    pattern, an anomaly, a drift signal, or an opportunity.
+
+    Inspired by HASP (arXiv:2605.17734): skills as executable intervention
+    functions with explicit activation conditions.
+
+    Attributes:
+        condition: When to fire
+        intervention: What to do
+        enabled: Whether this PF is active
+        activation_count: How many times this PF has fired
+        last_activated: When this PF last fired
+    """
+    condition: ActivationCondition
+    intervention: InterventionAction
+    enabled: bool = True
+    activation_count: int = 0
+    last_activated: Optional[datetime] = None
+
+    def should_fire(self, context: SkillContext, state: dict[str, Any]) -> bool:
+        if not self.enabled:
+            return False
+        if (
+            self.last_activated is not None
+            and self.condition.cooldown_seconds > 0
+        ):
+            elapsed = (datetime.now(timezone.utc) - self.last_activated).total_seconds()
+            if elapsed < self.condition.cooldown_seconds:
+                return False
+        return self.condition.predicate(context, state)
+
+    def fire(
+        self,
+        request: "SkillRequest",
+        context: SkillContext,
+        state: dict[str, Any],
+    ) -> Any:
+        self.activation_count += 1
+        self.last_activated = datetime.now(timezone.utc)
+        return self.intervention.action(request, context, state)
+
+
 class BaseSkillChip(ABC):
     """Abstract base class for all skill chips.
 
@@ -327,6 +421,9 @@ class BaseSkillChip(ABC):
     # Capabilities this chip uses
     capabilities: list[SkillCapability] = []
 
+    # Program Functions — proactive interventions (v2)
+    program_functions: list[ProgramFunction] = []
+
     def __init__(self) -> None:
         """Initialize the skill chip.
 
@@ -344,6 +441,7 @@ class BaseSkillChip(ABC):
             self.consensus_actions = []
         if not hasattr(self.__class__, 'capabilities') or self.capabilities is None:
             self.capabilities = []
+        self.program_functions = list(self.__class__.program_functions or [])
 
     @abstractmethod
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
@@ -416,6 +514,58 @@ class BaseSkillChip(ABC):
         """
         return action in self.consensus_actions
 
+    def register_program_function(self, pf: ProgramFunction) -> None:
+        """Register a Program Function on this skill chip."""
+        if not isinstance(self.program_functions, list):
+            self.program_functions = []
+        self.program_functions.append(pf)
+
+    def evaluate_interventions(
+        self, context: SkillContext, state: dict[str, Any]
+    ) -> list[ProgramFunction]:
+        """Check which Program Functions should fire given the current state.
+
+        Returns PFs in priority order (highest first). The caller decides
+        whether to execute them — this method only evaluates conditions.
+        """
+        if not self.program_functions:
+            return []
+        triggered = [
+            pf for pf in self.program_functions
+            if pf.should_fire(context, state)
+        ]
+        return sorted(triggered, key=lambda pf: pf.condition.priority, reverse=True)
+
+    async def handle_with_interventions(
+        self,
+        request: SkillRequest,
+        context: SkillContext,
+        state: dict[str, Any] | None = None,
+    ) -> SkillResponse:
+        """Execute handle() with Program Function intervention layer.
+
+        Before calling handle(), evaluates all registered PFs against the
+        current state. PFs that fire can either:
+        - Modify the request (modifies_request=True): the modified request
+          is passed to handle()
+        - Short-circuit (modifies_request=False): the PF's response is
+          returned directly, skipping handle()
+        """
+        state = state or {}
+        triggered = self.evaluate_interventions(context, state)
+
+        current_request = request
+        for pf in triggered:
+            result = pf.fire(current_request, context, state)
+            if pf.intervention.modifies_request:
+                if isinstance(result, SkillRequest):
+                    current_request = result
+            else:
+                if isinstance(result, SkillResponse):
+                    return result
+
+        return await self.handle(current_request, context)
+
     def get_info(self) -> dict[str, Any]:
         """Get chip metadata for registration/discovery.
 
@@ -436,6 +586,15 @@ class BaseSkillChip(ABC):
             'required_spans': list(self.required_spans),
             'consensus_actions': list(self.consensus_actions),
             'capabilities': [c.value for c in self.capabilities],
+            'program_functions': [
+                {
+                    'condition': pf.condition.name,
+                    'intervention': pf.intervention.name,
+                    'enabled': pf.enabled,
+                    'activation_count': pf.activation_count,
+                }
+                for pf in (self.program_functions or [])
+            ],
         }
 
 

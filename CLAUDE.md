@@ -17,7 +17,7 @@ Designed by CC (Coalition Code); spec co-authored by Thomas E. Synthesized from 
 - **Edit Budget** (v2): SkillOpt-inspired mutation cost bounds. Each proposal's magnitude is measured; proposals exceeding the budget are rejected before evaluation. Prevents runaway self-modification.
 - **Rejected-Edit Buffer** (v2): Preserves useful signal from failed modification proposals. Future proposals can draw from previously rejected rules that showed partial improvement.
 - **Drift Detection**: Continuous monitoring compares behavior against ethical baseline. Auto-corrects toward core values. BDI-grounded classification: healthy adaptation vs stale vs drift.
-- **Skill Chips**: 22 modular domain-specific handlers with built-in ethical guardrails. Each declares a domain, EFE weights, capabilities, and required integration spans.
+- **Skill Chips**: 22 modular domain-specific handlers with built-in ethical guardrails. Each declares a domain, EFE weights, capabilities, and required integration spans. v2: skills support Program Functions — proactive state-action interventions with activation conditions, cooldowns, and priority ordering. Skills can now detect failure-prone states and modify the next action automatically.
 - **Consensus Gate**: Major changes require multi-stakeholder approval. The agent cannot unilaterally modify its own ethics.
 - **Shield Module**: Hard constraints (PII protection, never share externally, etc.) that self-modification cannot override.
 
@@ -28,7 +28,7 @@ Designed by CC (Coalition Code); spec co-authored by Thomas E. Synthesized from 
 3. **BDI** -- Beliefs/Desires/Intentions store, coherence analysis, drift classification
 4. **Kintsugi Engine** -- Shadow fork, verifier, promoter, evolution pipeline (v2: edit budget + rejected buffer + holdout), staged deployment pipeline, calibration, drift detection
 5. **Memory** -- 3-stage CMA pipeline (extraction -> significance scoring -> hybrid retrieval), temporal log, spaced retrieval
-6. **Security** -- Intent capsules (cryptographic signing), shield, sandbox, PII redaction, invariants
+6. **Security** -- Intent capsules (cryptographic signing), shield, sandbox, PII redaction, invariants, skill provenance (v2: HMAC-SHA256 trust chain, quarantine for unsigned skills)
 7. **Governance** -- Consensus gate, OpenTelemetry, compliance (SB 53, SB 942, GRI)
 
 ## Key Directories

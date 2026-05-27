@@ -47,6 +47,9 @@ from kintsugi.kintsugi_engine.drift import (
     DriftConfig,
     DriftDetector,
     DriftEvent,
+    DriftLayer,
+    SSLDriftProfile,
+    SSLDriftSignal,
 )
 from kintsugi.kintsugi_engine.staged_pipeline import (
     CompatibilityCheck,
@@ -93,6 +96,9 @@ __all__ = [
     "DriftConfig",
     "DriftDetector",
     "DriftEvent",
+    "DriftLayer",
+    "SSLDriftProfile",
+    "SSLDriftSignal",
     # Staged deployment (v2)
     "CompatibilityCheck",
     "CompatibilityDimension",

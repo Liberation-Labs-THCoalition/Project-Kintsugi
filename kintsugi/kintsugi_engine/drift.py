@@ -1,4 +1,9 @@
-"""Mission drift detection for BDI-aligned organizations."""
+"""Mission drift detection for BDI-aligned organizations.
+
+v2 (May 2026): Added SSL drift decomposition (arXiv:2604.24026).
+Drift is typed along three layers — Scheduling, Structural, Logical —
+enabling targeted remediation instead of one-size-fits-all correction.
+"""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,6 +17,61 @@ class DriftCategory(Enum):
     STALE_BELIEFS = "stale_beliefs"
     INTENTION_DRIFT = "intention_drift"
     VALUES_TENSION = "values_tension"
+
+
+class DriftLayer(str, Enum):
+    """SSL drift decomposition — three orthogonal dimensions of drift.
+
+    Scheduling: the skill fires at the wrong time or frequency
+    Structural: the skill uses the wrong tools or execution path
+    Logical:    the skill produces the wrong output or reasoning
+    """
+    SCHEDULING = "scheduling"
+    STRUCTURAL = "structural"
+    LOGICAL = "logical"
+
+
+@dataclass
+class SSLDriftSignal:
+    """A typed drift signal along one SSL layer."""
+    layer: DriftLayer
+    magnitude: float
+    description: str
+    evidence: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.magnitude <= 1.0:
+            raise ValueError(f"magnitude must be in [0, 1], got {self.magnitude}")
+
+
+@dataclass
+class SSLDriftProfile:
+    """Decomposed drift profile across all three SSL layers."""
+    scheduling: float = 0.0
+    structural: float = 0.0
+    logical: float = 0.0
+    signals: List[SSLDriftSignal] = field(default_factory=list)
+
+    @property
+    def dominant_layer(self) -> DriftLayer:
+        scores = {
+            DriftLayer.SCHEDULING: self.scheduling,
+            DriftLayer.STRUCTURAL: self.structural,
+            DriftLayer.LOGICAL: self.logical,
+        }
+        return max(scores, key=scores.get)
+
+    @property
+    def total_drift(self) -> float:
+        return (self.scheduling + self.structural + self.logical) / 3.0
+
+    def get_remediation_hint(self) -> str:
+        dom = self.dominant_layer
+        if dom == DriftLayer.SCHEDULING:
+            return "Adjust activation timing, frequency, or trigger conditions"
+        if dom == DriftLayer.STRUCTURAL:
+            return "Review tool selection, execution path, or integration routing"
+        return "Check output quality, reasoning chain, or decision logic"
 
 
 @dataclass
@@ -140,6 +200,104 @@ class DriftDetector:
             return "warning" if swei < self.config.swei_threshold * 2 else "critical"
         # STALE_BELIEFS
         return "warning"
+
+    def analyze_ssl_drift(
+        self, recent_actions: List[dict], expected_patterns: dict
+    ) -> SSLDriftProfile:
+        """Decompose observed drift into SSL layers.
+
+        Compares recent actions against expected behavioral patterns to
+        identify whether drift is in timing (scheduling), tooling
+        (structural), or output quality (logical).
+
+        Parameters
+        ----------
+        recent_actions:
+            List of action dicts with fields: timestamp, tools_used,
+            output_quality (0-1), intent, duration_seconds.
+        expected_patterns:
+            Dict with fields: expected_tools (set), expected_frequency_hours
+            (float), min_output_quality (float).
+        """
+        signals: List[SSLDriftSignal] = []
+        scheduling_score = 0.0
+        structural_score = 0.0
+        logical_score = 0.0
+
+        if not recent_actions:
+            return SSLDriftProfile(signals=signals)
+
+        # Scheduling: are actions happening at the expected frequency?
+        expected_freq = expected_patterns.get("expected_frequency_hours", 0)
+        if expected_freq > 0 and len(recent_actions) >= 2:
+            timestamps = []
+            for a in recent_actions:
+                ts = a.get("timestamp")
+                if isinstance(ts, datetime):
+                    timestamps.append(ts)
+                elif isinstance(ts, str):
+                    try:
+                        timestamps.append(datetime.fromisoformat(ts))
+                    except (ValueError, TypeError):
+                        pass
+            if len(timestamps) >= 2:
+                timestamps.sort()
+                gaps = [
+                    (timestamps[i+1] - timestamps[i]).total_seconds() / 3600
+                    for i in range(len(timestamps) - 1)
+                ]
+                avg_gap = sum(gaps) / len(gaps)
+                freq_ratio = abs(avg_gap - expected_freq) / max(expected_freq, 0.01)
+                scheduling_score = min(freq_ratio, 1.0)
+                if scheduling_score > 0.3:
+                    signals.append(SSLDriftSignal(
+                        layer=DriftLayer.SCHEDULING,
+                        magnitude=scheduling_score,
+                        description=f"Action frequency {avg_gap:.1f}h vs expected {expected_freq:.1f}h",
+                        evidence={"avg_gap_hours": avg_gap, "expected_hours": expected_freq},
+                    ))
+
+        # Structural: are the right tools being used?
+        expected_tools = set(expected_patterns.get("expected_tools", []))
+        if expected_tools:
+            used_tools: set = set()
+            for a in recent_actions:
+                for t in a.get("tools_used", []):
+                    used_tools.add(t)
+            if used_tools:
+                overlap = expected_tools & used_tools
+                jaccard = len(overlap) / len(expected_tools | used_tools)
+                structural_score = 1.0 - jaccard
+                if structural_score > 0.3:
+                    unexpected = used_tools - expected_tools
+                    missing = expected_tools - used_tools
+                    signals.append(SSLDriftSignal(
+                        layer=DriftLayer.STRUCTURAL,
+                        magnitude=structural_score,
+                        description=f"Tool divergence: unexpected={unexpected}, missing={missing}",
+                        evidence={"expected": list(expected_tools), "used": list(used_tools)},
+                    ))
+
+        # Logical: is output quality maintained?
+        min_quality = expected_patterns.get("min_output_quality", 0.0)
+        qualities = [a.get("output_quality", 1.0) for a in recent_actions if "output_quality" in a]
+        if qualities and min_quality > 0:
+            avg_quality = sum(qualities) / len(qualities)
+            if avg_quality < min_quality:
+                logical_score = min((min_quality - avg_quality) / max(min_quality, 0.01), 1.0)
+                signals.append(SSLDriftSignal(
+                    layer=DriftLayer.LOGICAL,
+                    magnitude=logical_score,
+                    description=f"Output quality {avg_quality:.3f} below minimum {min_quality:.3f}",
+                    evidence={"avg_quality": avg_quality, "min_required": min_quality},
+                ))
+
+        return SSLDriftProfile(
+            scheduling=scheduling_score,
+            structural=structural_score,
+            logical=logical_score,
+            signals=signals,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers

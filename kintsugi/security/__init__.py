@@ -34,6 +34,14 @@ from kintsugi.security.sandbox import (
     SandboxResult,
     ShadowSandbox,
 )
+from kintsugi.security.skill_provenance import (
+    ProvenanceConfig,
+    ProvenanceRecord,
+    SkillProvenanceVerifier,
+    SkillSignature,
+    TrustedSigner,
+    TrustLevel,
+)
 from kintsugi.security.shield import (
     BudgetEnforcer,
     CircuitBreaker,
@@ -81,4 +89,11 @@ __all__ = [
     "InvariantChecker",
     "InvariantContext",
     "InvariantResult",
+    # skill provenance (v2)
+    "ProvenanceConfig",
+    "ProvenanceRecord",
+    "SkillProvenanceVerifier",
+    "SkillSignature",
+    "TrustedSigner",
+    "TrustLevel",
 ]

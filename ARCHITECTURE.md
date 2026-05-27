@@ -24,9 +24,9 @@ The v2.0 upgrade incorporates findings from 40+ papers published April-May 2026 
 
 - **SkillOpt pattern** (arXiv:2605.23904): Edit budget bounds mutation magnitude per proposal. Rejected-edit buffer preserves useful signal from failed modifications. Held-out workload validates against unseen data.
 - **Governed Capability Evolution** (arXiv:2604.08059): Staged deployment pipeline (SANDBOX → SHADOW → GATED → MONITORED → PROMOTED). Four compatibility dimensions checked at each stage. Shadow deployment catches 40% of regressions invisible to sandbox alone.
-- **HASP Program Functions** (arXiv:2605.17734): Skills upgraded from passive declarations to executable state-action interventions with activation conditions. *(planned)*
-- **SSL Drift Decomposition** (arXiv:2604.24026): Three-layer drift classification (Scheduling / Structural / Logical). Different drift types get different remediation. *(planned)*
-- **Skill Provenance Trust Boundary** (ClawHavoc, arXiv:2602.20156): Cryptographic trust chain for skill acquisition prevents supply chain attacks on self-modifying agents. *(planned)*
+- **HASP Program Functions** (arXiv:2605.17734): Skills upgraded from passive declarations to executable state-action interventions with activation conditions, cooldowns, and priority ordering.
+- **SSL Drift Decomposition** (arXiv:2604.24026): Three-layer drift classification (Scheduling / Structural / Logical). Each layer produces independent magnitude scores with targeted remediation hints. Combined profile identifies dominant drift dimension.
+- **Skill Provenance Trust Boundary** (ClawHavoc, arXiv:2602.20156): HMAC-SHA256 trust chain for skill acquisition. Unsigned skills quarantined, tampered skills rejected, revoked signers blocked. Full audit trail.
 
 **Architectural Metaphor:**
 | Concept | Maps To | Role |
