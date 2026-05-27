@@ -10,6 +10,7 @@ from kintsugi.kintsugi_engine.evolution import (
     EvolutionManager,
     ModificationProposal,
     ModificationScope,
+    RejectedEdit,
 )
 
 
@@ -169,13 +170,13 @@ class TestEvolutionManager:
     def test_get_generation_info(self):
         mgr = EvolutionManager()
         info = mgr.get_generation_info()
-        assert info == {
-            "generation": 0,
-            "total_evaluated": 0,
-            "total_approved": 0,
-            "total_rejected": 0,
-            "queue_depth": 0,
-        }
+        assert info["generation"] == 0
+        assert info["total_evaluated"] == 0
+        assert info["total_approved"] == 0
+        assert info["total_rejected"] == 0
+        assert info["queue_depth"] == 0
+        assert info["rejected_buffer_size"] == 0
+        assert info["holdout_workload_size"] == 0
 
     def test_full_lifecycle(self):
         mgr = EvolutionManager()
@@ -203,3 +204,136 @@ class TestEvolutionManager:
         mgr = EvolutionManager()
         with pytest.raises(KeyError):
             mgr.discard_proposal("nonexistent")
+
+
+# --- Mutation Budget (SkillOpt edit budget) ---
+
+class TestMutationBudget:
+    def test_compute_mutation_cost_flat(self):
+        assert EvolutionManager.compute_mutation_cost({"a": 1, "b": 2}) == 2.0
+
+    def test_compute_mutation_cost_nested(self):
+        cost = EvolutionManager.compute_mutation_cost({"a": {"x": 1, "y": 2}, "b": 3})
+        assert cost == 3.0
+
+    def test_compute_mutation_cost_empty(self):
+        assert EvolutionManager.compute_mutation_cost({}) == 0.0
+
+    def test_submit_within_budget(self):
+        mgr = EvolutionManager(EvolutionConfig(mutation_budget=5.0))
+        p = mgr.submit_proposal(ModificationScope.PROMPT, "small", {"a": 1, "b": 2})
+        assert p.mutation_cost == 2.0
+
+    def test_submit_exceeds_budget_raises(self):
+        mgr = EvolutionManager(EvolutionConfig(mutation_budget=2.0))
+        with pytest.raises(ValueError, match="exceeds budget"):
+            mgr.submit_proposal(
+                ModificationScope.PROMPT, "too big",
+                {"a": 1, "b": 2, "c": 3}
+            )
+
+    def test_default_budget_allows_single_change(self):
+        mgr = EvolutionManager()
+        p = mgr.submit_proposal(ModificationScope.PROMPT, "one change", {"key": "val"})
+        assert p.mutation_cost == 1.0
+
+    def test_default_budget_blocks_double_change(self):
+        mgr = EvolutionManager()
+        with pytest.raises(ValueError, match="exceeds budget"):
+            mgr.submit_proposal(
+                ModificationScope.PROMPT, "two changes",
+                {"a": 1, "b": 2}
+            )
+
+
+# --- Rejected-Edit Buffer ---
+
+class TestRejectedBuffer:
+    def test_reject_populates_buffer(self):
+        mgr = EvolutionManager(EvolutionConfig(mutation_budget=5.0))
+        p = mgr.submit_proposal(ModificationScope.PROMPT, "will fail", {"k": 1})
+        mgr.activate_next()
+        mgr.complete_evaluation(p.proposal_id, "REJECT", 0.3, {"quality": 0.8})
+        buf = mgr.get_rejected_buffer()
+        assert len(buf) == 1
+        assert buf[0].proposal_id == p.proposal_id
+        assert buf[0].partial_scores == {"quality": 0.8}
+
+    def test_approve_does_not_populate_buffer(self):
+        mgr = EvolutionManager(EvolutionConfig(mutation_budget=5.0))
+        p = mgr.submit_proposal(ModificationScope.PROMPT, "will pass", {"k": 1})
+        mgr.activate_next()
+        mgr.complete_evaluation(p.proposal_id, "APPROVE", 0.9)
+        assert len(mgr.get_rejected_buffer()) == 0
+
+    def test_buffer_respects_max_size(self):
+        mgr = EvolutionManager(EvolutionConfig(
+            mutation_budget=5.0, rejected_buffer_size=3
+        ))
+        for i in range(5):
+            p = mgr.submit_proposal(ModificationScope.PROMPT, f"fail-{i}", {"k": i})
+            mgr.activate_next()
+            mgr.complete_evaluation(p.proposal_id, "REJECT", 0.1)
+        buf = mgr.get_rejected_buffer()
+        assert len(buf) == 3
+        assert buf[0].description == "fail-2"
+
+    def test_pop_rejected_by_scope(self):
+        mgr = EvolutionManager(EvolutionConfig(
+            mutation_budget=5.0,
+            allowed_scopes=[ModificationScope.PROMPT, ModificationScope.TOOL_CONFIG],
+        ))
+        p1 = mgr.submit_proposal(ModificationScope.PROMPT, "prompt-fail", {"a": 1})
+        mgr.activate_next()
+        mgr.complete_evaluation(p1.proposal_id, "REJECT", 0.2)
+
+        p2 = mgr.submit_proposal(ModificationScope.TOOL_CONFIG, "tool-fail", {"b": 1})
+        mgr.activate_next()
+        mgr.complete_evaluation(p2.proposal_id, "REJECT", 0.2)
+
+        popped = mgr.pop_rejected_by_scope(ModificationScope.PROMPT)
+        assert len(popped) == 1
+        assert popped[0].scope == ModificationScope.PROMPT
+        assert len(mgr.get_rejected_buffer()) == 1
+
+    def test_escalate_also_buffers(self):
+        mgr = EvolutionManager(EvolutionConfig(mutation_budget=5.0))
+        p = mgr.submit_proposal(ModificationScope.PROMPT, "escalated", {"k": 1})
+        mgr.activate_next()
+        mgr.complete_evaluation(p.proposal_id, "ESCALATE", 0.5)
+        assert len(mgr.get_rejected_buffer()) == 1
+
+
+# --- Holdout Workload ---
+
+class TestHoldoutWorkload:
+    def test_set_and_get_holdout(self):
+        mgr = EvolutionManager()
+        items = [{"task": "t1"}, {"task": "t2"}]
+        mgr.set_holdout_workload(items)
+        got = mgr.get_holdout_workload()
+        assert got == items
+        assert got is not items
+
+    def test_holdout_in_generation_info(self):
+        mgr = EvolutionManager()
+        mgr.set_holdout_workload([{"a": 1}])
+        info = mgr.get_generation_info()
+        assert info["holdout_workload_size"] == 1
+        assert info["rejected_buffer_size"] == 0
+
+    def test_config_holdout_fraction(self):
+        cfg = EvolutionConfig(holdout_fraction=0.3)
+        assert cfg.holdout_fraction == 0.3
+
+
+# --- Generation Info with new fields ---
+
+class TestGenerationInfoV2:
+    def test_includes_new_fields(self):
+        mgr = EvolutionManager()
+        info = mgr.get_generation_info()
+        assert "rejected_buffer_size" in info
+        assert "holdout_workload_size" in info
+        assert info["rejected_buffer_size"] == 0
+        assert info["holdout_workload_size"] == 0

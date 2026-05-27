@@ -12,31 +12,49 @@ Most AI systems are static—trained once, deployed forever. Kintsugi is differe
 
 - **Evolve its own decision weights** based on real-world outcomes
 - **Fork shadow copies** to test changes before applying them
+- **Graduate changes through a 5-stage deployment pipeline** before reaching production
 - **Detect value drift** and auto-correct toward its ethical baseline
 - **Learn from stakeholder feedback** while requiring consensus for major changes
+- **Preserve useful signal from failed experiments** via rejected-edit buffers
+- **Bound the magnitude of any single change** via edit budgets
 
 All self-modification happens within safety guardrails. The system literally cannot evolve away from its core values.
 
 ### How It Works
 
 ```
-                    ┌─────────────────┐
-                    │  Shadow Fork    │ ← Test changes safely
-                    │  (Isolated)     │
-                    └────────┬────────┘
-                             │ verify
-    ┌────────────┐    ┌──────▼──────┐    ┌─────────────┐
-    │ Stakeholder│───►│  Kintsugi   │───►│  Promoted   │
-    │  Feedback  │    │   Engine    │    │  Changes    │
-    └────────────┘    └──────┬──────┘    └─────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │ Drift Detection │ ← Catch value misalignment
-                    │ & Calibration   │
-                    └─────────────────┘
+                         ┌─────────────┐
+                         │   Proposal   │ ← Edit budget bounds magnitude
+                         └──────┬───────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │   SANDBOX             │ ← Synthetic workload
+                    └───────────┬───────────┘
+                                │ pass
+                    ┌───────────▼───────────┐
+                    │   SHADOW              │ ← Real workload, no user impact
+                    └───────────┬───────────┘
+                                │ pass (catches 40% more regressions)
+                    ┌───────────▼───────────┐
+                    │   GATED               │ ← Human approval required
+                    └───────────┬───────────┘
+                                │ approved
+                    ┌───────────▼───────────┐
+                    │   MONITORED           │ ← Auto-rollback triggers
+                    └───────────┬───────────┘
+                                │ stable
+                    ┌───────────▼───────────┐
+                    │   PROMOTED            │ ← Golden trace recorded
+                    └───────────────────────┘
+
+  Failure at any stage → ROLLBACK (useful signal → rejected-edit buffer)
 ```
 
-**Shadow Forking**: Before any self-modification, Kintsugi creates an isolated copy of itself, tests the changes, and only promotes them if they pass verification.
+**Staged Deployment Pipeline**: Every modification passes through five stages of increasing commitment. Sandbox tests against synthetic workload. Shadow runs against real workload without affecting users. Gated requires human approval. Monitored runs in production with automatic rollback triggers. Only after passing all stages does a modification become permanent. Research shows this catches 40% more regressions than sandbox alone.
+
+**Edit Budget**: Inspired by SkillOpt (Microsoft, 2026), each proposal's mutation magnitude is measured and bounded. This prevents runaway self-modification — the system can only change a little at a time, like a learning rate for behavior.
+
+**Rejected-Edit Buffer**: When a modification fails, any useful signal it contained is preserved. Future proposals can draw from previously rejected rules that showed partial improvement, preventing catastrophic forgetting.
 
 **Drift Detection**: Continuous monitoring compares current behavior against the ethical baseline. If the system starts drifting from its values, it auto-corrects.
 

@@ -26,6 +26,7 @@ from kintsugi.kintsugi_engine.evolution import (
     EvolutionManager,
     ModificationProposal,
     ModificationScope,
+    RejectedEdit,
 )
 from kintsugi.kintsugi_engine.calibration import (
     CalibrationConfig,
@@ -47,6 +48,15 @@ from kintsugi.kintsugi_engine.drift import (
     DriftDetector,
     DriftEvent,
 )
+from kintsugi.kintsugi_engine.staged_pipeline import (
+    CompatibilityCheck,
+    CompatibilityDimension,
+    DeploymentRecord,
+    DeploymentStage,
+    PipelineConfig,
+    StagedPipeline,
+    StageResult,
+)
 
 __all__ = [
     # Stream 3A
@@ -67,6 +77,7 @@ __all__ = [
     "EvolutionManager",
     "ModificationProposal",
     "ModificationScope",
+    "RejectedEdit",
     "CalibrationConfig",
     "CalibrationEngine",
     "CalibrationRecord",
@@ -82,4 +93,12 @@ __all__ = [
     "DriftConfig",
     "DriftDetector",
     "DriftEvent",
+    # Staged deployment (v2)
+    "CompatibilityCheck",
+    "CompatibilityDimension",
+    "DeploymentRecord",
+    "DeploymentStage",
+    "PipelineConfig",
+    "StagedPipeline",
+    "StageResult",
 ]

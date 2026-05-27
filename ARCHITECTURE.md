@@ -1,5 +1,5 @@
 # Kintsugi: The Self-Repairing Agentic Harness
-## v1.1 Specification — Liberation Labs
+## v2.0 Specification — Liberation Labs
 
 > *Kintsugi (金継ぎ): The Japanese art of repairing broken pottery with gold. Every modification is visible, verified, and makes the system stronger than the original.*
 
@@ -14,9 +14,19 @@
 
 Kintsugi is not a chatbot wrapper. It is an **operating system for autonomous agents** that can verify their own evolution.
 
-The core insight: agents that serve mission-driven organizations need to **grow with the mission** — adapting to new compliance requirements, learning from operational patterns, refining their own behavior — without anyone needing to manually retune them. But unverified self-modification is dangerous. Kintsugi solves this through **empirical shadow verification**: every proposed change runs in parallel isolation against real workload before promotion.
+The core insight: agents that serve mission-driven organizations need to **grow with the mission** — adapting to new compliance requirements, learning from operational patterns, refining their own behavior — without anyone needing to manually retune them. But unverified self-modification is dangerous. Kintsugi solves this through **empirical shadow verification**: every proposed change runs through a graduated deployment pipeline before reaching production.
 
 Every self-modification leaves a golden trace in the audit log. The repair is the beauty.
+
+### v2.0 Enhancements (May 2026)
+
+The v2.0 upgrade incorporates findings from 40+ papers published April-May 2026 in the agentic skill evolution, self-healing agents, and KV cache geometry fields. Key integrations:
+
+- **SkillOpt pattern** (arXiv:2605.23904): Edit budget bounds mutation magnitude per proposal. Rejected-edit buffer preserves useful signal from failed modifications. Held-out workload validates against unseen data.
+- **Governed Capability Evolution** (arXiv:2604.08059): Staged deployment pipeline (SANDBOX → SHADOW → GATED → MONITORED → PROMOTED). Four compatibility dimensions checked at each stage. Shadow deployment catches 40% of regressions invisible to sandbox alone.
+- **HASP Program Functions** (arXiv:2605.17734): Skills upgraded from passive declarations to executable state-action interventions with activation conditions. *(planned)*
+- **SSL Drift Decomposition** (arXiv:2604.24026): Three-layer drift classification (Scheduling / Structural / Logical). Different drift types get different remediation. *(planned)*
+- **Skill Provenance Trust Boundary** (ClawHavoc, arXiv:2602.20156): Cryptographic trust chain for skill acquisition prevents supply chain attacks on self-modifying agents. *(planned)*
 
 **Architectural Metaphor:**
 | Concept | Maps To | Role |
