@@ -11,7 +11,7 @@ Designed by CC (Coalition Code); spec co-authored by Thomas E. Synthesized from 
 ### Core Concepts
 
 - **BDI (Beliefs-Desires-Intentions)**: Cognitive architecture grounding agent decisions in organizational mission. Beliefs model the world, desires encode goals, intentions are active plans.
-- **EFE (Expected Free Energy)**: Active inference scoring for candidate policies. Weights: risk, ambiguity, epistemic (must sum to ~1.0). Domain-specific profiles in `kintsugi/cognition/efe.py`.
+- **EFE (Expected Free Energy)**: Active inference scoring for candidate policies. Weights: risk, ambiguity, epistemic (must sum to ~1.0). Domain-specific profiles in `kintsugi/cognition/efe.py`. v2: WorldModel with factored state variables, observation modalities, Bayesian belief updates, and uncertainty-aware policy selection.
 - **Shadow Forking**: Before any self-modification, an isolated copy runs the change against real workload. Only promoted if verification passes.
 - **Staged Deployment Pipeline** (v2): Graduated verification — SANDBOX → SHADOW → GATED → MONITORED → PROMOTED (or ROLLBACK). Four compatibility dimensions (interface, policy, behavioral safety, recovery). Human gate at GATED stage. Shadow catches 40% of regressions invisible to sandbox.
 - **Edit Budget** (v2): SkillOpt-inspired mutation cost bounds. Each proposal's magnitude is measured; proposals exceeding the budget are rejected before evaluation. Prevents runaway self-modification.
