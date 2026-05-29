@@ -1,4 +1,10 @@
-"""
+"""Skill Chip: Community Asset Mapper
+
+Domain: COMMUNITY
+Spans: geocoding_api, asset_database, community_survey
+EFE Profile: risk=0.33, ambiguity=0.34, epistemic=0.33
+Description: Maps and inventories local community resources, skills, and assets for resource coordination.
+
 Community Asset Mapper Skill Chip for Kintsugi CMA.
 
 Maps and inventories local community resources, skills, and assets to enable
