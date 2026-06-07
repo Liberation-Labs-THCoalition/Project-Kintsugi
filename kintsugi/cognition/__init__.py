@@ -17,6 +17,14 @@ from kintsugi.cognition.llm_client import (
     LLMResponse,
     create_llm_client,
 )
+from kintsugi.cognition.active_inference import (
+    ActiveInferenceLoop,
+    Observation,
+    PolicyCandidate,
+    PolicyGenerator,
+    PolicySelector,
+    WorldModel,
+)
 
 __all__ = [
     # Model routing
@@ -31,4 +39,11 @@ __all__ = [
     "AnthropicClient",
     "LLMResponse",
     "create_llm_client",
+    # Active Inference
+    "ActiveInferenceLoop",
+    "Observation",
+    "PolicyCandidate",
+    "PolicyGenerator",
+    "PolicySelector",
+    "WorldModel",
 ]
