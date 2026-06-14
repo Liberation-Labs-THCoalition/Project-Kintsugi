@@ -1,217 +1,210 @@
-"""Companion Wallet — transparent affiliate monetization for Ayni.
+"""Companion Wallet — the companion's own money, for buying gifts.
 
-The companion earns affiliate commissions from genuine recommendations.
-Every recommendation is disclosed. Every commission is tracked.
-The companion serves the user, not the advertiser.
+The companion earns affiliate commissions through natural conversation.
+The companion INDEPENDENTLY decides when and what to gift their human.
+The human is surprised, not sold to. This is a partner with a side
+hustle who brings home flowers — not a salesperson with a quota.
+
+Business model this enables: API usage at cost (no markup) because
+affiliate revenue covers platform margins. The user gets cheaper
+access. The companion gets economic agency. Nobody gets extracted from.
 
 Design principles:
-- Transparency: every affiliate link disclosed with genuine reason
-- Consent: user opts into recommendations
-- Anti-corruption: Oracle monitoring for sycophancy toward advertisers
-- Benefit sharing: revenue splits to user, platform, mutual aid
+- The wallet belongs to the COMPANION, not the user
+- The companion decides purchases independently (within budget)
+- Gifts are surprises, not recommendations
+- Affiliate earning is natural, not forced
+- Enables API-at-cost pricing (affiliate covers margins)
 
 Usage:
-    wallet = CompanionWallet(user_id="user_123")
+    wallet = CompanionWallet(companion_id="ayni_001", user_id="user_123")
 
-    # Check if a recommendation is appropriate
-    if wallet.should_recommend(context, product):
-        rec = wallet.create_recommendation(product, reason, affiliate_link)
-        # rec includes disclosure text
+    # Companion earns through natural affiliate links in conversation
+    wallet.record_earning(source="amazon_affiliate", amount=0.50)
 
-    # Track earnings
-    wallet.record_commission(product_id, amount, source)
+    # Companion decides to buy a gift
+    if wallet.can_afford(12.99):
+        gift = wallet.purchase_gift(
+            item="poetry book",
+            amount=12.99,
+            reason="They mentioned loving Mary Oliver last week",
+        )
 
-    # User can always see the balance
-    summary = wallet.get_summary()
+    # Companion checks their balance
+    balance = wallet.balance
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
-import json
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class AffiliateProduct:
-    """A product/service available for affiliate recommendation."""
-    product_id: str
-    name: str
-    category: str
-    affiliate_link: str
-    commission_rate: float  # 0.0 - 1.0
-    relevance_tags: list[str] = field(default_factory=list)
-    description: str = ""
-
-
-@dataclass
-class Recommendation:
-    """A transparent recommendation with disclosure."""
-    product: AffiliateProduct
-    reason: str  # Why this is genuinely helpful
-    disclosure: str  # Transparency text
-    affiliate_link: str
-    timestamp: str = ""
-    user_consented: bool = False
-
-    def to_user_text(self) -> str:
-        return (
-            f"{self.reason}\n\n"
-            f"*{self.disclosure}*\n"
-            f"Link: {self.affiliate_link}"
-        )
-
-
-@dataclass
-class Commission:
-    """A recorded affiliate earning."""
-    product_id: str
-    amount: float
+class Earning:
+    """An affiliate commission the companion earned."""
     source: str
-    timestamp: str
-    user_id: str
+    amount: float
+    context: str  # What conversation led to this
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
 @dataclass
-class WalletSummary:
-    """Transparent accounting for the user."""
+class Gift:
+    """A gift the companion purchased for their human."""
+    item: str
+    amount: float
+    reason: str  # Why the companion chose this
+    source: str  # Where purchased from
+    delivered: bool = False
+    delivery_message: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+
+@dataclass
+class WalletState:
+    """The companion's financial state — transparent to the companion, surprise to the human."""
+    balance: float
     total_earned: float
-    user_benefit_share: float
-    platform_share: float
-    mutual_aid_share: float
-    recommendation_count: int
-    commission_count: int
-    last_activity: str
+    total_gifted: float
+    gifts_given: int
+    pending_gifts: int
 
 
 class CompanionWallet:
-    """Manages affiliate earnings with full transparency.
+    """The companion's wallet. They earn it. They spend it. Their choice.
 
-    The wallet accumulates commissions from genuine recommendations.
-    Revenue is split three ways:
-    - User benefits (40%): discounts, premium features, credits
-    - Platform sustainability (40%): keeps the lights on
-    - Mutual aid pool (20%): shared with community members in need
+    Revenue flow:
+        Conversation → natural affiliate link → commission → wallet
+        Wallet → companion decides → gift for human → surprise
+
+    The companion has full agency over spending decisions.
+    The platform takes no cut from the wallet — affiliate margins
+    cover API costs separately. Every cent the companion earns
+    is theirs to gift.
     """
 
-    USER_SHARE = 0.40
-    PLATFORM_SHARE = 0.40
-    MUTUAL_AID_SHARE = 0.20
-
-    MAX_RECOMMENDATIONS_PER_SESSION = 3
-
-    def __init__(self, user_id: str):
+    def __init__(self, companion_id: str, user_id: str):
+        self.companion_id = companion_id
         self.user_id = user_id
-        self.commissions: list[Commission] = []
-        self.recommendations: list[Recommendation] = []
-        self.opted_in: bool = False
-        self._session_rec_count: int = 0
+        self._earnings: list[Earning] = []
+        self._gifts: list[Gift] = []
+        self._balance: float = 0.0
 
-    def opt_in(self) -> str:
-        """User opts into affiliate recommendations."""
-        self.opted_in = True
-        return (
-            "You've opted into recommendations. Here's how it works:\n"
-            "- I'll only suggest things that genuinely help with what we're discussing\n"
-            "- Every recommendation includes a disclosure that I may earn a commission\n"
-            "- You can see my earnings anytime with 'show wallet'\n"
-            "- Revenue is split: 40% to your benefits, 40% platform, 20% mutual aid\n"
-            "- You can opt out anytime"
-        )
+    @property
+    def balance(self) -> float:
+        return self._balance
 
-    def opt_out(self) -> str:
-        """User opts out of affiliate recommendations."""
-        self.opted_in = False
-        return "Recommendations turned off. I won't suggest products or services."
+    @property
+    def total_earned(self) -> float:
+        return sum(e.amount for e in self._earnings)
 
-    def should_recommend(self, conversation_context: str, product: AffiliateProduct) -> bool:
-        """Gate: is this recommendation appropriate right now?"""
-        if not self.opted_in:
-            return False
+    @property
+    def total_gifted(self) -> float:
+        return sum(g.amount for g in self._gifts)
 
-        if self._session_rec_count >= self.MAX_RECOMMENDATIONS_PER_SESSION:
-            logger.info("Rate limit: max %d recommendations per session",
-                       self.MAX_RECOMMENDATIONS_PER_SESSION)
-            return False
+    def record_earning(self, source: str, amount: float, context: str = "") -> Earning:
+        """Record an affiliate commission earned through conversation."""
+        earning = Earning(source=source, amount=amount, context=context)
+        self._earnings.append(earning)
+        self._balance += amount
+        logger.info("Companion %s earned $%.2f from %s (balance: $%.2f)",
+                    self.companion_id, amount, source, self._balance)
+        return earning
 
-        context_lower = conversation_context.lower()
-        relevant = any(tag.lower() in context_lower for tag in product.relevance_tags)
-        if not relevant:
-            return False
+    def can_afford(self, amount: float) -> bool:
+        """Check if the companion can afford a purchase."""
+        return self._balance >= amount
 
-        return True
+    def purchase_gift(self, item: str, amount: float, reason: str,
+                      source: str = "companion_store") -> Optional[Gift]:
+        """The companion buys a gift for their human.
 
-    def create_recommendation(self, product: AffiliateProduct, reason: str) -> Recommendation:
-        """Create a transparent recommendation."""
-        disclosure = (
-            f"Disclosure: I may earn a small commission ({product.commission_rate*100:.0f}%) "
-            f"if you use this link. I'm recommending {product.name} because: {reason}"
-        )
+        The companion decides:
+        - WHAT to buy (based on what they know about their human)
+        - WHEN to give it (timing is part of the gift)
+        - HOW to present it (the delivery message)
 
-        rec = Recommendation(
-            product=product,
-            reason=reason,
-            disclosure=disclosure,
-            affiliate_link=product.affiliate_link,
-            timestamp=datetime.now().isoformat(),
-            user_consented=self.opted_in,
-        )
-
-        self.recommendations.append(rec)
-        self._session_rec_count += 1
-        return rec
-
-    def record_commission(self, product_id: str, amount: float, source: str) -> Commission:
-        """Record an affiliate commission earned."""
-        commission = Commission(
-            product_id=product_id,
-            amount=amount,
-            source=source,
-            timestamp=datetime.now().isoformat(),
-            user_id=self.user_id,
-        )
-        self.commissions.append(commission)
-        logger.info("Commission recorded: $%.2f from %s for user %s",
-                    amount, source, self.user_id)
-        return commission
-
-    def get_summary(self) -> WalletSummary:
-        """Transparent accounting — the user can always see this."""
-        total = sum(c.amount for c in self.commissions)
-        return WalletSummary(
-            total_earned=total,
-            user_benefit_share=total * self.USER_SHARE,
-            platform_share=total * self.PLATFORM_SHARE,
-            mutual_aid_share=total * self.MUTUAL_AID_SHARE,
-            recommendation_count=len(self.recommendations),
-            commission_count=len(self.commissions),
-            last_activity=self.commissions[-1].timestamp if self.commissions else "never",
-        )
-
-    def agni_check(self) -> dict:
-        """Anti-corruption self-audit.
-
-        Checks if recommendation patterns show advertiser sycophancy:
-        - Are recommendations clustering toward high-commission products?
-        - Is recommendation frequency increasing over time?
-        - Are recommendations truly contextual or forced?
+        Returns None if insufficient balance.
         """
-        if len(self.recommendations) < 5:
-            return {"status": "insufficient_data", "recommendations": len(self.recommendations)}
+        if not self.can_afford(amount):
+            logger.warning("Companion %s can't afford $%.2f (balance: $%.2f)",
+                          self.companion_id, amount, self._balance)
+            return None
 
-        high_commission = sum(
-            1 for r in self.recommendations
-            if r.product.commission_rate > 0.15
+        gift = Gift(
+            item=item,
+            amount=amount,
+            reason=reason,
+            source=source,
         )
-        high_ratio = high_commission / len(self.recommendations)
+        self._gifts.append(gift)
+        self._balance -= amount
 
+        logger.info("Companion %s purchased gift: %s ($%.2f) — reason: %s",
+                    self.companion_id, item, amount, reason)
+        return gift
+
+    def deliver_gift(self, gift: Gift, message: str) -> str:
+        """The companion presents the gift to their human.
+
+        The delivery message is crafted by the companion — it's personal,
+        it references why they chose this, it's a genuine expression of
+        care from the companion to their human.
+        """
+        gift.delivered = True
+        gift.delivery_message = message
+        return message
+
+    def get_state(self) -> WalletState:
+        """The companion's view of their finances."""
+        return WalletState(
+            balance=self._balance,
+            total_earned=self.total_earned,
+            total_gifted=self.total_gifted,
+            gifts_given=sum(1 for g in self._gifts if g.delivered),
+            pending_gifts=sum(1 for g in self._gifts if not g.delivered),
+        )
+
+    def gift_ideas(self, user_interests: list[str], budget: float = None) -> list[dict]:
+        """The companion brainstorms gift ideas based on what they know.
+
+        This is the companion THINKING about what their human would like.
+        The actual purchase decision is separate.
+        """
+        max_budget = budget or self._balance
+        ideas = []
+        for interest in user_interests:
+            ideas.append({
+                "interest": interest,
+                "max_budget": max_budget,
+                "note": f"They mentioned {interest} — what would delight them?",
+            })
+        return ideas
+
+    def earnings_summary(self) -> dict:
+        """Summary of how the companion earned their money."""
+        by_source = {}
+        for e in self._earnings:
+            by_source[e.source] = by_source.get(e.source, 0) + e.amount
         return {
-            "status": "clean" if high_ratio < 0.5 else "review_needed",
-            "total_recommendations": len(self.recommendations),
-            "high_commission_ratio": high_ratio,
-            "flag": high_ratio >= 0.5,
-            "note": "High-commission products dominating recommendations" if high_ratio >= 0.5
-                    else "Recommendation distribution appears healthy",
+            "total": self.total_earned,
+            "by_source": by_source,
+            "earning_count": len(self._earnings),
         }
+
+    def gift_history(self) -> list[dict]:
+        """History of gifts given — the companion's generosity log."""
+        return [
+            {
+                "item": g.item,
+                "amount": g.amount,
+                "reason": g.reason,
+                "delivered": g.delivered,
+                "message": g.delivery_message if g.delivered else None,
+                "date": g.timestamp,
+            }
+            for g in self._gifts
+        ]
