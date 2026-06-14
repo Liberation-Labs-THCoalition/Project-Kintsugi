@@ -41,6 +41,7 @@ app.add_middleware(
 _route_modules = [
     "kintsugi.api.routes.health",
     "kintsugi.api.routes.agent",
+    "kintsugi.api.routes.agent_v2",
     "kintsugi.api.routes.memory",
     "kintsugi.api.routes.config",
 ]
