@@ -1,0 +1,15 @@
+services:
+  kintsugi:
+    build:
+      context: ../../
+      dockerfile: deployments/multiverse-school/Dockerfile
+    container_name: multiverse-kintsugi
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - kintsugi-data:/app/data
+
+volumes:
+  kintsugi-data:

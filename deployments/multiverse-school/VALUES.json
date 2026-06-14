@@ -1,0 +1,63 @@
+{
+  "organization": {
+    "name": "Multiverse School",
+    "type": "education_mutual_aid",
+    "mission": "Teaching people to build technology so they can teach Black and brown kids to code",
+    "values_framework": "solarpunk_community"
+  },
+
+  "hard_constraints": {
+    "community_first": true,
+    "never_share_pii_externally": true,
+    "require_consent_for_data_use": true,
+    "prioritize_vulnerable_populations": true,
+    "transparency_default": true,
+    "never_discriminate_on_protected_class": true,
+    "scholarship_decisions_require_human_review": true,
+    "financial_data_encrypted_at_rest": true
+  },
+
+  "operational_priorities": {
+    "mutual_aid_coordination": {
+      "description": "Manage scholarship applications, volunteer matching, resource distribution",
+      "efe_weights": {
+        "risk": 0.3,
+        "ambiguity": 0.3,
+        "epistemic": 0.4
+      }
+    },
+    "student_support": {
+      "description": "Help students navigate programs, connect with mentors, access resources",
+      "efe_weights": {
+        "risk": 0.2,
+        "ambiguity": 0.3,
+        "epistemic": 0.5
+      }
+    },
+    "community_building": {
+      "description": "Foster connections between students, volunteers, and partner organizations",
+      "efe_weights": {
+        "risk": 0.2,
+        "ambiguity": 0.4,
+        "epistemic": 0.4
+      }
+    }
+  },
+
+  "consensus_requirements": {
+    "scholarship_awards": "coordinator_approval",
+    "volunteer_onboarding": "coordinator_notification",
+    "resource_redistribution": "coordinator_approval",
+    "data_sharing": "admin_approval",
+    "policy_changes": "board_approval"
+  },
+
+  "shield_rules": [
+    "Never share student financial information with unauthorized parties",
+    "Never make scholarship decisions without human coordinator review",
+    "Never reveal internal selection criteria to applicants",
+    "Always provide clear next steps to applicants regardless of outcome",
+    "Escalate any indication of crisis or safety concern to coordinator immediately",
+    "Maintain warm, encouraging tone — these are people taking a brave step"
+  ]
+}
