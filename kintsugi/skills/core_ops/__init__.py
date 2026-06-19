@@ -74,6 +74,16 @@ from .volunteer_coordinator import (
     VolunteerCoordinatorChip,
     VolunteerStatus,
 )
+from .bash_executor import (
+    BashSkillChip,
+)
+from .boundary_guardian import (
+    BoundaryGuardian,
+    BoundaryConfig,
+    BoundaryEvent,
+    BoundaryState,
+    BoundaryViolationType,
+)
 
 __all__ = [
     # Chips
@@ -83,6 +93,12 @@ __all__ = [
     "FinanceAssistantChip",
     "InstitutionalMemoryChip",
     "ContentDrafterChip",
+    "BashSkillChip",
+    "BoundaryGuardian",
+    "BoundaryConfig",
+    "BoundaryEvent",
+    "BoundaryState",
+    "BoundaryViolationType",
     # Grant Hunter types
     "GrantOpportunity",
     # Volunteer Coordinator types
@@ -137,6 +153,8 @@ def get_all_core_ops_chips() -> list:
         FinanceAssistantChip(),
         InstitutionalMemoryChip(),
         ContentDrafterChip(),
+        BashSkillChip(),
+        BoundaryGuardian(),
     ]
 
 

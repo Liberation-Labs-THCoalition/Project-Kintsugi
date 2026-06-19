@@ -22,32 +22,37 @@ from typing import Any, Callable, Coroutine, Optional
 class SkillDomain(str, Enum):
     """Domains that skill chips operate in.
 
-    Each domain represents a functional area of nonprofit operations.
-    Skill chips declare their domain to enable domain-based routing
-    and EFE weight customization.
-
-    Attributes:
-        FUNDRAISING: Grant writing, donor management, campaigns
-        OPERATIONS: Day-to-day organizational operations
-        PROGRAMS: Program delivery and management
-        COMMUNICATIONS: External and internal communications
-        FINANCE: Financial management and reporting
-        GOVERNANCE: Board management, compliance, policies
-        COMMUNITY: Community engagement and relationships
-        MUTUAL_AID: Mutual aid coordination and distribution
-        ADVOCACY: Policy advocacy and campaigns
-        MEMBER_SERVICES: Member support and services
+    Deployments extend this with their own domains via register_domain().
+    Core domains cover common use cases; specialized domains (intimate,
+    investigation, security) are registered by their respective scaffolds.
     """
-    FUNDRAISING = "fundraising"
+    # Core domains (always available)
+    GENERAL = "general"
     OPERATIONS = "operations"
-    PROGRAMS = "programs"
     COMMUNICATIONS = "communications"
+    SHELL = "shell"
+
+    # Prosocial / nonprofit domains
+    FUNDRAISING = "fundraising"
+    PROGRAMS = "programs"
     FINANCE = "finance"
     GOVERNANCE = "governance"
     COMMUNITY = "community"
     MUTUAL_AID = "mutual_aid"
     ADVOCACY = "advocacy"
     MEMBER_SERVICES = "member_services"
+
+    # Companion domains (Ayni)
+    INTIMATE = "intimate"
+    CONSENT = "consent"
+    MEMORY = "memory"
+    DEVICE = "device"
+    PRESENCE = "presence"
+
+    # Investigation domains (Scout, Emet)
+    INVESTIGATION = "investigation"
+    RESEARCH = "research"
+    SECURITY = "security"
 
 
 @dataclass
@@ -261,6 +266,7 @@ class SkillCapability(str, Enum):
     PII_ACCESS = "pii_access"
     SCHEDULE_TASKS = "schedule_tasks"
     GENERATE_REPORTS = "generate_reports"
+    EXECUTE_SHELL = "execute_shell"
 
 
 @dataclass
