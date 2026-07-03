@@ -825,7 +825,143 @@ These inform the long-term trajectory. They are NOT blocking implementation.
 
 ---
 
-## VIII. Acknowledgments
+## VIII. Service Framework Layer (v2.1 — July 2026)
+
+The seven engine layers above make one agent safe. The service framework
+layer makes Kintsugi a deployable, multi-agent platform: a REST API, a
+live web dashboard, runtime personality/skill configuration, and the
+Oracle Loop integration point. Design goal: **`pip install -e . &&
+kintsugi serve`** brings up the full stack with zero external services
+(PostgreSQL and an Oracle harness attach when available, and everything
+degrades gracefully when they don't).
+
+### 1. Component Map
+
+```
+                         ┌─────────────────────────────┐
+                         │   kintsugi serve (uvicorn)   │
+                         └──────────────┬───────────────┘
+              ┌───────────────┬─────────┴─────────┬──────────────┐
+              ▼               ▼                   ▼              ▼
+        /dashboard       /api/v1/*           /api/v1/events   /docs
+        (Jinja2+htmx)    (REST)              (SSE stream)     (OpenAPI)
+              │               │                   ▲
+              │        ┌──────┴──────────┐        │ publishes
+              ▼        ▼                 ▼        │
+        SessionManager ── AgentManager ── AgentInstance(s) ──► EventBus
+                               │               │
+                     PersonalityRegistry       │ every response
+                     (YAML/TOML configs)       ▼
+                                       OracleLoopMonitor ──► OracleHook(s)
+                                        off|observe|enforce   (HTTP → Project
+                                               │               Oracle harness)
+                                               ▼
+                        security → routing → skill execution (shared engine)
+```
+
+New packages:
+
+| Package | Contents |
+|---------|----------|
+| `kintsugi/agents/` | `personality.py` (YAML/TOML configs), `instance.py` (message pipeline), `manager.py` (multi-agent spawn/stop), `sessions.py` (conversations), `events.py` (pub/sub bus) |
+| `kintsugi/oracle/` | `hooks.py` (OracleHook protocol, HTTP/callable/null hooks), `monitor.py` (mode policy, verdict history) |
+| `kintsugi/api/routes/` | `fleet.py`, `sessions.py`, `skills.py`, `oracle.py`, `events.py` — all under `/api/v1/*` |
+| `kintsugi/dashboard/` | Server-rendered htmx dashboard, vendored `htmx.min.js`, SSE-driven live event feed |
+| `kintsugi/skills/bootstrap.py` | Registers all built-in chips at startup |
+| `kintsugi/config/personalities/` | `default.yaml`, `guardian.yaml`, `researcher.toml` |
+
+### 2. REST API
+
+All framework endpoints are process-local and DB-free; the legacy
+org-scoped routes (`/api/agent`, `/api/memory`) remain unchanged.
+
+- `POST /api/v1/agents` — spawn an instance from a personality; `GET`
+  lists, `DELETE /{id}` stops. `POST /{id}/messages` for one-shot turns.
+- `GET /api/v1/agents/personalities` + `/personalities/reload` —
+  personality catalog, hot-reloadable from disk.
+- `POST /api/v1/sessions` — create a conversation bound to a new or
+  existing agent; `POST /{id}/messages` runs the full pipeline;
+  history capped per session.
+- `GET /api/v1/skills` — chip catalog; `POST /{name}/execute` runs one
+  chip directly (consensus flags returned, never bypassed).
+- `POST /api/v1/skills/plugins/{name}/load|reload` / `DELETE` — hot-swap
+  plugins from `PLUGIN_DIRS` at runtime via the sandboxed plugin loader.
+- `GET /api/v1/oracle/status|verdicts`, `PUT /api/v1/oracle/mode|endpoint`
+  — Oracle Loop control surface.
+- `GET /api/v1/events/recent`, `GET /api/v1/events/stream` (SSE) — the
+  observability feed the dashboard runs on.
+
+### 3. Agent Pipeline
+
+Every message to an `AgentInstance` runs:
+
+```
+SecurityMonitor.check_text        (injection/traversal patterns → hard block)
+  → PIIRedactor.redact            (redacted form used for routing + Oracle)
+  → Orchestrator.route            (keyword → EFE → optional LLM classifier)
+  → skill selection               (domain chips ∩ personality allow/deny,
+                                   name-affinity ranking, intent matching)
+  → chip.handle()                 (existing skill chip guardrails apply)
+  → OracleLoopMonitor.review      (every response, before delivery)
+```
+
+Each stage publishes to the EventBus (`message.received`, `.routed`,
+`skill.executed`, `oracle.verdict`, `.completed`), which is what the
+dashboard renders in real time.
+
+### 4. Oracle Loop Integration Point
+
+Kintsugi does not implement detection; it guarantees a place to stand.
+`OracleHook` is a two-member protocol (`name`, `async review(turn) ->
+OracleVerdict`). The monitor applies mode policy per personality:
+
+- **off** — skip review.
+- **observe** — run hooks, record verdicts, never alter output (default).
+- **enforce** — flagged responses with `score ≥ block_threshold` are
+  replaced with a withholding notice; the original is kept in the
+  verdict record for review.
+
+Hook **errors always fail open** (a dead Oracle must not take the agent
+down) but are counted and surfaced. Attach a running Oracle harness by
+setting `ORACLE_ENDPOINT` (or `PUT /api/v1/oracle/endpoint`) — each turn
+is POSTed as JSON, expecting `{"status": "clean"|"flagged", "score":
+0-1, "signals": {...}}`. In-process detectors wrap any callable via
+`CallableOracleHook`.
+
+### 5. Personalities (Configuration System)
+
+One YAML/TOML file per archetype in `kintsugi/config/personalities/`
+(override with `PERSONALITY_DIR`): identity + system prompt, cognition
+EFE weights (risk/ambiguity/epistemic, validated to sum ≈ 1.0), model
+tier, `skills.allow`/`skills.deny` glob patterns (deny wins), and a
+safety block (`oracle_mode`, `block_threshold`, `max_actions_per_turn`,
+`consensus_actions`). Shipped examples: `default` (balanced, observe),
+`guardian` (risk 0.6, enforce, shell denied), `researcher` (epistemic
+0.6, TOML). VALUES.json hard constraints are untouched by personalities
+— a personality can only narrow, never widen, what the engine allows.
+
+### 6. Web Dashboard
+
+Server-rendered Jinja2 + vendored htmx (no build step, no CDN). Panels:
+agent fleet (spawn/stop), Oracle Loop (mode control, verdict table,
+review stats), sessions, skill registry, a chat console that exercises
+the full pipeline, and a live event feed over SSE. Polling partials
+refresh every 4–30 s; the event feed is push.
+
+### 7. Deployment & Scaling Notes
+
+- Framework state (agents, sessions, events, verdicts) is deliberately
+  **process-local** with bounded buffers — restart-cheap, horizontally
+  shardable by org. Multi-node event fan-out belongs in a
+  MiddlewarePlugin (Redis/NATS bridge), not in core.
+- `kintsugi serve --host --port --reload --workers` wraps uvicorn;
+  `[project.scripts]` exposes the `kintsugi` CLI on install.
+- Startup order: skill bootstrap → DB probe (non-fatal) → routes →
+  dashboard. A missing database disables only persistent memory.
+
+---
+
+## IX. Acknowledgments
 
 - **Project Orion** (Thomas E.): Original architectural vision, Active Inference integration, prosocial skill chip design, VALUES.json governance model, security posture aligned with ASI Top 10.
 - **OpenClaw** (steipete et al.): DM pairing pattern, security self-audit concept through neccessity, channel abstraction lessons (and cautionary tale about complexity and security).
@@ -838,7 +974,7 @@ These inform the long-term trajectory. They are NOT blocking implementation.
 
 ---
 
-## IX. A Note on the Name
+## X. A Note on the Name
 
 Kintsugi — the golden repair. In the Japanese tradition, broken pottery is mended with gold lacquer, making the repair visible and the object more beautiful than before it broke.
 

@@ -1,0 +1,36 @@
+<div class="stat-row">
+  <div class="stat"><b>{{ oracle.stats.reviewed }}</b><span>reviewed</span></div>
+  <div class="stat"><b>{{ oracle.stats.flagged }}</b><span>flagged</span></div>
+  <div class="stat"><b>{{ oracle.stats.blocked }}</b><span>blocked</span></div>
+  <div class="stat"><b>{{ oracle.stats.errors }}</b><span>errors</span></div>
+</div>
+<form class="inline" style="margin-bottom: 0.7rem"
+      hx-post="/dashboard/actions/oracle-mode" hx-target="#oracle-panel" hx-swap="innerHTML">
+  <span class="badge {{ oracle.mode }}">{{ oracle.mode }}</span>
+  <select name="mode">
+    <option value="off" {% if oracle.mode == "off" %}selected{% endif %}>off</option>
+    <option value="observe" {% if oracle.mode == "observe" %}selected{% endif %}>observe</option>
+    <option value="enforce" {% if oracle.mode == "enforce" %}selected{% endif %}>enforce</option>
+  </select>
+  <button type="submit">set mode</button>
+  <span style="color: var(--dim); font-size: 0.78rem">
+    hooks: {{ oracle.hooks|join(", ") }}{% if not oracle.monitored %} (detection pipeline not attached){% endif %}
+  </span>
+</form>
+{% if verdicts %}
+<table>
+  <tr><th>time</th><th>agent</th><th>status</th><th>score</th><th>ms</th></tr>
+  {% for v in verdicts %}
+  <tr>
+    <td>{{ v.timestamp[11:19] }}</td>
+    <td>{{ v.agent_id }}</td>
+    <td><span class="badge {{ 'blocked' if v.blocked else v.status }}">
+        {{ 'blocked' if v.blocked else v.status }}</span></td>
+    <td>{{ "%.2f"|format(v.score) }}</td>
+    <td>{{ v.latency_ms }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">no verdicts yet — every agent response will be reviewed here</div>
+{% endif %}

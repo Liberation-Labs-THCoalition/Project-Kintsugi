@@ -1,0 +1,31 @@
+<form class="inline" style="margin-bottom: 0.7rem"
+      hx-post="/dashboard/actions/spawn" hx-target="#agents-panel" hx-swap="innerHTML">
+  <select name="personality">
+    {% for p in personalities %}
+    <option value="{{ p.name }}">{{ p.display_name }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">+ spawn agent</button>
+</form>
+{% if agents %}
+<table>
+  <tr><th>id</th><th>personality</th><th>state</th><th>oracle</th><th>msgs</th><th>skills</th><th>blocks</th><th></th></tr>
+  {% for a in agents %}
+  <tr>
+    <td>{{ a.id }}</td>
+    <td>{{ a.display_name }}</td>
+    <td><span class="badge {{ a.state }}">{{ a.state }}</span></td>
+    <td><span class="badge {{ a.oracle_mode }}">{{ a.oracle_mode }}</span></td>
+    <td>{{ a.stats.messages }}</td>
+    <td>{{ a.stats.skills_executed }}</td>
+    <td>{{ a.stats.security_blocks + a.stats.oracle_blocks }}</td>
+    <td>
+      <button class="danger" hx-post="/dashboard/actions/stop/{{ a.id }}"
+              hx-target="#agents-panel" hx-swap="innerHTML">stop</button>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">no agents running — spawn one above, or POST /api/v1/agents</div>
+{% endif %}

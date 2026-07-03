@@ -1,0 +1,18 @@
+{% if error %}
+<div class="turn"><span class="badge error">error</span> <span class="meta">{{ error }}</span></div>
+{% else %}
+<div class="turn user">
+  <div class="who">you → {{ turn.agent_id }}</div>
+  <div class="msg">{{ sent_message }}</div>
+</div>
+<div class="turn agent">
+  <div class="who">{{ turn.agent_id }}
+    {% if turn.skill_used %}· skill: {{ turn.skill_used }}{% endif %}
+    · oracle: <span class="badge {{ 'blocked' if turn.blocked else turn.oracle.status }}">
+      {{ 'blocked' if turn.blocked else turn.oracle.status }}</span>
+  </div>
+  <div class="msg">{{ turn.response }}</div>
+  <div class="meta">domain: {{ turn.routing.domain }} ({{ turn.routing.confidence }})
+    · security: {{ turn.security.verdict }}</div>
+</div>
+{% endif %}
