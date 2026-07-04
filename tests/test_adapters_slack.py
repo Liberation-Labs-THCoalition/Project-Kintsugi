@@ -1262,9 +1262,7 @@ class TestInstallationStore:
 
         with pytest.raises(NotImplementedError):
             import asyncio
-            asyncio.get_event_loop().run_until_complete(
-                store.save(MagicMock())
-            )
+            asyncio.run(store.save(MagicMock()))
 
 
 # ==============================================================================
