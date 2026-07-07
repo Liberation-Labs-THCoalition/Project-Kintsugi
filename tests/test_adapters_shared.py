@@ -1308,7 +1308,7 @@ class TestInMemoryAllowlistStore:
                 entry = make_allowlist_entry(org_id="org_b", platform_user_id=f"user_b_{i}")
                 await allowlist_store.add(entry)
 
-        asyncio.get_event_loop().run_until_complete(add_entries())
+        asyncio.run(add_entries())
 
         assert len(allowlist_store) == 5
 
