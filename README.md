@@ -132,12 +132,46 @@ Domain-specific handlers with built-in ethical guardrails:
 git clone https://github.com/Liberation-Labs-THCoalition/Project-Kintsugi.git
 cd Project-Kintsugi
 
+# Install and serve (no database required — persistent memory
+# activates automatically when PostgreSQL is reachable)
+pip install -e .
+kintsugi serve
+# → API docs:  http://127.0.0.1:8000/docs
+# → Dashboard: http://127.0.0.1:8000/dashboard
+
 # Minimal deployment (SQLite, no external deps)
 docker compose -f docker-compose.seed.yml up
 
 # Full stack (PostgreSQL + pgvector + Redis)
 docker compose up
 ```
+
+### Framework API in 30 seconds
+
+```bash
+# Spawn an agent from a personality config
+curl -X POST localhost:8000/api/v1/agents -H 'content-type: application/json' \
+     -d '{"personality": "guardian"}'
+
+# Start a conversation
+curl -X POST localhost:8000/api/v1/sessions -H 'content-type: application/json' \
+     -d '{"personality": "default"}'
+curl -X POST localhost:8000/api/v1/sessions/<id>/messages \
+     -H 'content-type: application/json' \
+     -d '{"message": "find grants for our food justice program"}'
+
+# Watch everything live
+curl -N localhost:8000/api/v1/events/stream
+
+# Attach a running Oracle harness (every agent response gets reviewed)
+curl -X PUT localhost:8000/api/v1/oracle/endpoint \
+     -H 'content-type: application/json' \
+     -d '{"endpoint": "http://oracle-host:9000/api/v1/review"}'
+```
+
+Agent personalities (EFE weights, skill allow/deny, Oracle mode) are
+YAML/TOML files in `kintsugi/config/personalities/`. See
+`ARCHITECTURE.md` §VIII for the service framework design.
 
 ---
 

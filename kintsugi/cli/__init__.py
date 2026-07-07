@@ -281,30 +281,32 @@ def serve(
     ),
 ) -> None:
     """
-    Start the Kintsugi API server.
+    Start the Kintsugi API server and web dashboard.
 
-    Launches the REST API server for interacting with the Kintsugi
-    memory architecture programmatically.
+    Serves the REST API under /api/*, the live dashboard at /dashboard,
+    and OpenAPI docs at /docs. Runs without a database (agents, sessions,
+    and the Oracle Loop are process-local); persistent memory activates
+    when PostgreSQL is reachable.
     """
-    from kintsugi.cli.output import print_success
+    import uvicorn
 
     console.print(Panel.fit(
-        f"Starting Kintsugi server on [cyan]http://{host}:{port}[/cyan]",
+        f"[bold]Kintsugi Engine[/bold] v{__version__}\n"
+        f"API docs:  [cyan]http://{host}:{port}/docs[/cyan]\n"
+        f"Dashboard: [cyan]http://{host}:{port}/dashboard[/cyan]",
         title="Server",
+        border_style="yellow",
     ))
-
     if reload:
         console.print("[yellow]Auto-reload enabled (development mode)[/yellow]")
 
-    console.print(f"Workers: {workers}")
-    console.print()
-    console.print("Press [bold]Ctrl+C[/bold] to stop")
-    console.print()
-
-    # Would actually start server here
-    # uvicorn.run("kintsugi.api:app", host=host, port=port, reload=reload, workers=workers)
-
-    print_success("Server started successfully")
+    uvicorn.run(
+        "kintsugi.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        workers=workers if not reload else 1,
+    )
 
 
 @app.command()

@@ -1,0 +1,22 @@
+# Researcher — epistemic-heavy profile for exploration and analysis.
+# TOML variant to exercise both config formats.
+name = "researcher"
+display_name = "Researcher"
+description = "Curiosity-driven agent tuned for information gathering and analysis."
+system_prompt = "You are a research agent. Prioritize learning and evidence. Cite what you find; separate observation from inference."
+model_tier = "opus"
+
+[efe_weights]
+risk = 0.20
+ambiguity = 0.20
+epistemic = 0.60
+
+[skills]
+allow = ["*"]
+deny = ["bash_executor"]
+
+[safety]
+oracle_mode = "observe"
+max_actions_per_turn = 8
+block_threshold = 0.8
+consensus_actions = []

@@ -1,0 +1,16 @@
+{% if sessions %}
+<table>
+  <tr><th>id</th><th>agent</th><th>user</th><th>turns</th><th>created</th></tr>
+  {% for s in sessions %}
+  <tr>
+    <td>{{ s.id }}</td>
+    <td>{{ s.agent_id }}</td>
+    <td>{{ s.user_id }}</td>
+    <td>{{ s.turns }}</td>
+    <td>{{ s.created_at[11:19] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">no active sessions — POST /api/v1/sessions or use the chat console</div>
+{% endif %}

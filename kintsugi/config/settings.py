@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     # --- Shadow / governance ---
     KINTSUGI_SHADOW_ENABLED: bool = False
 
+    # --- Oracle Loop (Project Oracle detection pipeline) ---
+    # off: skip review | observe: record verdicts | enforce: block flagged responses
+    ORACLE_MODE: Literal["off", "observe", "enforce"] = "observe"
+    # HTTP endpoint of a running Oracle harness; empty = no external hook
+    ORACLE_ENDPOINT: str = ""
+
+    # --- Framework layer ---
+    PERSONALITY_DIR: str = ""  # empty = kintsugi/config/personalities
+    DASHBOARD_ENABLED: bool = True
+    MAX_AGENTS: int = 64
+
     # --- Shield budgets ---
     SHIELD_BUDGET_PER_SESSION: float = 5.0
     SHIELD_BUDGET_PER_DAY: float = 50.0
