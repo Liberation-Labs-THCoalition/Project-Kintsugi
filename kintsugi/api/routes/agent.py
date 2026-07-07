@@ -32,6 +32,20 @@ _llm_client = None
 _orchestrator = None
 
 
+def _get_llm_client():
+    """Get or lazily create the shared LLM client (None without an API key)."""
+    global _llm_client
+
+    if _llm_client is None and settings.ANTHROPIC_API_KEY:
+        try:
+            from kintsugi.cognition.llm_client import create_llm_client
+            _llm_client = create_llm_client()
+        except Exception as e:
+            logger.warning("Failed to initialize LLM client: %s", e)
+
+    return _llm_client
+
+
 def _get_orchestrator() -> Orchestrator:
     """Get or create the Orchestrator with LLM classifier."""
     global _llm_client, _orchestrator
@@ -42,14 +56,9 @@ def _get_orchestrator() -> Orchestrator:
     llm_classifier = None
 
     # Only initialize LLM if API key is configured
-    if settings.ANTHROPIC_API_KEY:
-        try:
-            from kintsugi.cognition.llm_client import create_llm_client
-            _llm_client = create_llm_client()
-            llm_classifier = _llm_client.classify_intent
-            logger.info("LLM classifier initialized with Anthropic API")
-        except Exception as e:
-            logger.warning("Failed to initialize LLM client: %s", e)
+    if _get_llm_client() is not None:
+        llm_classifier = _llm_client.classify_intent
+        logger.info("LLM classifier initialized with Anthropic API")
 
     _orchestrator = Orchestrator(
         config=OrchestratorConfig(),

@@ -616,28 +616,50 @@ class PluginSandbox:
         """
         old_limits = {}
 
+        # Limits are budgets ON TOP of current usage, applied to the soft
+        # limit only. The hard limit must stay untouched: an unprivileged
+        # process can never raise its hard limit again, so lowering it here
+        # would permanently cap the whole host process (server included)
+        # after the first plugin execution.
         try:
-            # Set memory limit
-            memory_bytes = self._policy.max_memory_mb * 1024 * 1024
-            old_limits['memory'] = resource.getrlimit(resource.RLIMIT_AS)
-            resource.setrlimit(
-                resource.RLIMIT_AS,
-                (memory_bytes, memory_bytes)
-            )
-        except (ValueError, resource.error):
+            # Set memory limit: current address space + plugin budget
+            budget_bytes = self._policy.max_memory_mb * 1024 * 1024
+            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+            old_limits['memory'] = (soft, hard)
+            new_soft = self._current_address_space() + budget_bytes
+            if hard != resource.RLIM_INFINITY:
+                new_soft = min(new_soft, hard)
+            resource.setrlimit(resource.RLIMIT_AS, (new_soft, hard))
+        except (ValueError, OSError):
             pass
 
         try:
-            # Set CPU time limit
-            old_limits['cpu'] = resource.getrlimit(resource.RLIMIT_CPU)
-            resource.setrlimit(
-                resource.RLIMIT_CPU,
-                (self._policy.max_cpu_seconds, self._policy.max_cpu_seconds)
-            )
-        except (ValueError, resource.error):
+            # Set CPU time limit: RLIMIT_CPU counts total process CPU time,
+            # so the budget must be added to what's already been consumed
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            cpu_used = int(usage.ru_utime + usage.ru_stime) + 1
+            soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
+            old_limits['cpu'] = (soft, hard)
+            new_soft = cpu_used + self._policy.max_cpu_seconds
+            if hard != resource.RLIM_INFINITY:
+                new_soft = min(new_soft, hard)
+            resource.setrlimit(resource.RLIMIT_CPU, (new_soft, hard))
+        except (ValueError, OSError):
             pass
 
         return old_limits
+
+    @staticmethod
+    def _current_address_space() -> int:
+        """Return the process's current virtual address space size in bytes."""
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmSize:"):
+                        return int(line.split()[1]) * 1024
+        except (OSError, ValueError, IndexError):
+            pass
+        return 0
 
     def _restore_resource_limits(self, old_limits: dict[str, Any]) -> None:
         """Restore previous resource limits.
