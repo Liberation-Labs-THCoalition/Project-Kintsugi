@@ -146,7 +146,7 @@ class TestSkillDomain:
             "MEMBER_SERVICES",
         ]
         actual_domains = [d.name for d in SkillDomain]
-        assert len(actual_domains) >= 10
+        assert len(actual_domains) >= 10  # Core + scaffold-specific domains
         for domain in expected_domains:
             assert domain in actual_domains
 
@@ -461,7 +461,7 @@ class TestSkillCapability:
             "GENERATE_REPORTS",
         ]
         actual_capabilities = [c.name for c in SkillCapability]
-        assert len(actual_capabilities) >= 8
+        assert len(actual_capabilities) >= 8  # Core + scaffold-specific capabilities
         for cap in expected_capabilities:
             assert cap in actual_capabilities
 
