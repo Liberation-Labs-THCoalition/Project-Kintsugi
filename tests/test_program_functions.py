@@ -182,7 +182,7 @@ class TestSkillChipWithPF:
             ),
         ))
         req = SkillRequest(intent="test", raw_input="hello")
-        resp = asyncio.get_event_loop().run_until_complete(
+        resp = asyncio.run(
             chip.handle_with_interventions(req, _ctx())
         )
         assert resp.content == "echo: [MODIFIED] hello"
@@ -196,7 +196,7 @@ class TestSkillChipWithPF:
             ),
         ))
         req = SkillRequest(intent="test", raw_input="hello")
-        resp = asyncio.get_event_loop().run_until_complete(
+        resp = asyncio.run(
             chip.handle_with_interventions(req, _ctx())
         )
         assert resp.content == "INTERCEPTED"
@@ -204,7 +204,7 @@ class TestSkillChipWithPF:
     def test_handle_without_interventions_passes_through(self):
         chip = EchoChip()
         req = SkillRequest(intent="test", raw_input="hello")
-        resp = asyncio.get_event_loop().run_until_complete(
+        resp = asyncio.run(
             chip.handle_with_interventions(req, _ctx())
         )
         assert resp.content == "echo: hello"
@@ -230,12 +230,12 @@ class TestSkillChipWithPF:
         ))
         req = SkillRequest(intent="test", raw_input="hello")
 
-        resp_ok = asyncio.get_event_loop().run_until_complete(
+        resp_ok = asyncio.run(
             chip.handle_with_interventions(req, _ctx(), state={"error": False})
         )
         assert resp_ok.content == "echo: hello"
 
-        resp_err = asyncio.get_event_loop().run_until_complete(
+        resp_err = asyncio.run(
             chip.handle_with_interventions(req, _ctx(), state={"error": True})
         )
         assert resp_err.content == "INTERCEPTED"

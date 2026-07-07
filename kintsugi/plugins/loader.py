@@ -657,9 +657,14 @@ class PluginLoader:
             try:
                 import asyncio
                 if asyncio.iscoroutinefunction(loaded.instance.shutdown):
-                    asyncio.get_event_loop().run_until_complete(
-                        loaded.instance.shutdown()
-                    )
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        asyncio.run(loaded.instance.shutdown())
+                    else:
+                        # Called from async context (e.g. the hot-swap API
+                        # routes) — blocking here would deadlock the loop.
+                        loop.create_task(loaded.instance.shutdown())
                 else:
                     loaded.instance.shutdown()
             except Exception as e:
