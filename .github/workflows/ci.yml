@@ -20,7 +20,7 @@ jobs:
           pip install -r requirements-test.txt
           pip install -e .
       - name: Run security tests
-        run: pytest tests/test_security_*.py -v --tb=short
+        run: pytest tests/test_security_*.py -v --tb=line -p no:cacheprovider
 
   test-memory:
     name: Memory Tests
@@ -35,7 +35,7 @@ jobs:
           pip install -r requirements-test.txt
           pip install -e .
       - name: Run memory tests
-        run: pytest tests/test_memory_*.py -v --tb=short
+        run: pytest tests/test_memory_*.py -v --tb=line -p no:cacheprovider
 
   test-config:
     name: Config Tests
@@ -50,7 +50,7 @@ jobs:
           pip install -r requirements-test.txt
           pip install -e .
       - name: Run config tests
-        run: pytest tests/test_config_*.py -v --tb=short
+        run: pytest tests/test_config_*.py -v --tb=line -p no:cacheprovider
 
   test-engine:
     name: Engine & BDI Tests
@@ -68,7 +68,7 @@ jobs:
         run: |
           pytest tests/test_shadow_fork.py tests/test_verifier.py tests/test_promoter.py \
                  tests/test_evolution.py tests/test_calibration.py tests/test_bloom_adapter.py \
-                 tests/test_drift_detector.py tests/test_bdi_*.py -v --tb=short
+                 tests/test_drift_detector.py tests/test_bdi_*.py -v --tb=line -p no:cacheprovider
 
   test-adapters:
     name: Adapter Tests
@@ -83,7 +83,7 @@ jobs:
           pip install -r requirements-test.txt
           pip install -e .
       - name: Run adapter tests
-        run: pytest tests/test_adapters_*.py -v --tb=short
+        run: pytest tests/test_adapters_*.py -v --tb=line -p no:cacheprovider
 
   test-skills:
     name: Skills Tests
@@ -98,7 +98,7 @@ jobs:
           pip install -r requirements-test.txt
           pip install -e .
       - name: Run skills tests
-        run: pytest tests/test_skills_*.py -v --tb=short
+        run: pytest tests/test_skills_*.py -v --tb=line -p no:cacheprovider
 
   test-core:
     name: Core & Integration Tests
@@ -117,4 +117,4 @@ jobs:
           pytest tests/test_cognition_*.py tests/test_governance_*.py \
                  tests/test_integrations_*.py tests/test_api_extensions.py \
                  tests/test_cli.py tests/test_multitenancy.py tests/test_plugins.py \
-                 tests/test_tuning.py tests/test_phase1_integration.py -v --tb=short
+                 tests/test_tuning.py tests/test_phase1_integration.py -v --tb=line -p no:cacheprovider
