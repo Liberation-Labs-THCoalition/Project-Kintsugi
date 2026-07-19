@@ -60,6 +60,38 @@ from kintsugi.kintsugi_engine.staged_pipeline import (
     StagedPipeline,
     StageResult,
 )
+from kintsugi.kintsugi_engine.scaffold_generator import (
+    ScaffoldGenerator,
+    ScaffoldMemory,
+    ScaffoldProposal,
+)
+from kintsugi.kintsugi_engine.scaffold_comparator import (
+    ScaffoldComparator,
+    ScaffoldComparison,
+    ScaffoldMetrics,
+    run_scaffold_comparison,
+)
+from kintsugi.kintsugi_engine.scaffold_memory import (
+    InMemoryScaffoldKG,
+    ScaffoldRecord,
+)
+from kintsugi.kintsugi_engine.scaffold_exploration import (
+    ExplorationDecision,
+    ExplorationResult,
+    ScaffoldExplorer,
+)
+from kintsugi.kintsugi_engine.scaffold_orchestrator import (
+    ScaffoldExecutionResult,
+    ScaffoldOrchestrator,
+    ScaffoldOrchestratorConfig,
+)
+from kintsugi.kintsugi_engine.persona_gate import (
+    PersonaGate,
+    PersonaGateConfig,
+    PersonaGateResult,
+    PersonaMeasurement,
+    PersonaStatus,
+)
 
 __all__ = [
     # Stream 3A
@@ -107,4 +139,26 @@ __all__ = [
     "PipelineConfig",
     "StagedPipeline",
     "StageResult",
+    # Adaptive scaffold evolution
+    "ScaffoldGenerator",
+    "ScaffoldMemory",
+    "ScaffoldProposal",
+    "ScaffoldComparator",
+    "ScaffoldComparison",
+    "ScaffoldMetrics",
+    "run_scaffold_comparison",
+    "InMemoryScaffoldKG",
+    "ScaffoldRecord",
+    "ExplorationDecision",
+    "ExplorationResult",
+    "ScaffoldExplorer",
+    "ScaffoldExecutionResult",
+    "ScaffoldOrchestrator",
+    "ScaffoldOrchestratorConfig",
+    # Persona coherence gate (OGPSA)
+    "PersonaGate",
+    "PersonaGateConfig",
+    "PersonaGateResult",
+    "PersonaMeasurement",
+    "PersonaStatus",
 ]
