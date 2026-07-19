@@ -212,9 +212,12 @@ class InMemoryScaffoldKG:
             "wins": {f"{p}|{tt}": v for (p, tt), v in self._wins.items()},
             "losses": {f"{p}|{tt}": v for (p, tt), v in self._losses.items()},
             "head_to_head": {f"{p}|{l}": v for (p, l), v in self._head_to_head.items()},
+            "skill_combos": {k: sorted(v) for k, v in self._skill_combos.items()},
             "records": [
                 {"task_type": r.task_type, "winner": r.winner_pattern,
                  "loser": r.loser_pattern, "margin": r.margin,
+                 "winner_skills": r.winner_skills,
+                 "loser_skills": r.loser_skills,
                  "timestamp": r.timestamp}
                 for r in self._records
             ],
@@ -233,4 +236,16 @@ class InMemoryScaffoldKG:
         for key, val in data.get("head_to_head", {}).items():
             p, l = key.split("|", 1)
             kg._head_to_head[(p, l)] = val
+        for key, combos in data.get("skill_combos", {}).items():
+            kg._skill_combos[key] = set(combos)
+        for rec in data.get("records", []):
+            kg._records.append(ScaffoldRecord(
+                task_type=rec["task_type"],
+                winner_pattern=rec["winner"],
+                loser_pattern=rec["loser"],
+                margin=rec["margin"],
+                winner_skills=rec.get("winner_skills", []),
+                loser_skills=rec.get("loser_skills", []),
+                timestamp=rec.get("timestamp", ""),
+            ))
         return kg
