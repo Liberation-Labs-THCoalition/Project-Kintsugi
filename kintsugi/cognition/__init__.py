@@ -17,6 +17,10 @@ from kintsugi.cognition.llm_client import (
     LLMResponse,
     create_llm_client,
 )
+from kintsugi.cognition.openai_compat_client import (
+    OpenAICompatClient,
+    create_openai_compat_client,
+)
 from kintsugi.cognition.active_inference import (
     ActiveInferenceLoop,
     Observation,
@@ -39,6 +43,9 @@ __all__ = [
     "AnthropicClient",
     "LLMResponse",
     "create_llm_client",
+    # OpenAI-compatible client (vLLM, llama-server, LM Studio, Ollama /v1)
+    "OpenAICompatClient",
+    "create_openai_compat_client",
     # Active Inference
     "ActiveInferenceLoop",
     "Observation",
