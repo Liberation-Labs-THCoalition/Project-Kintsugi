@@ -175,6 +175,31 @@ YAML/TOML files in `kintsugi/config/personalities/`. See
 
 ---
 
+## MCP Server (Memory Tools for Claude Code)
+
+This repo registers a real MCP server (`kintsugi/integrations/mcp_server.py`)
+via `.mcp.json`, exposing Kintsugi's memory system as tools inside a Claude
+Code session working in this directory: `kintsugi_memory_search`,
+`kintsugi_memory_store`, `kintsugi_memory_temporal_search`,
+`kintsugi_memory_events_recent`.
+
+Setup:
+
+1. `cp .env.example .env` and fill in `CLAUDE_CODE_OAUTH_TOKEN` (preferred —
+   generate with `claude setup-token`) or `ANTHROPIC_API_KEY` as a fallback.
+   Required for consolidation/enrichment code paths that call out to Claude.
+2. `pip install -e .` — the server runs as `python -m
+   kintsugi.integrations.mcp_server` in its own process, so `kintsugi` must
+   be an installed package, not just importable via cwd.
+3. `kintsugi_memory_search`, `kintsugi_memory_store`, and
+   `kintsugi_memory_events_recent` need Postgres: `docker compose up db`
+   then `alembic upgrade head`. `kintsugi_memory_temporal_search` is the one
+   exception — it's backed by its own local SQLite file
+   (`TEMPORAL_TREE_DB_PATH`) and works with no database running at all.
+4. Restart Claude Code, then `/mcp` to confirm `kintsugi-memory` connects.
+
+---
+
 ## Project Stats
 
 - **~77,000 lines** of Python

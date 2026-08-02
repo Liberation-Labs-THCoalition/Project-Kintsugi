@@ -2,6 +2,7 @@
 
 Provides controlled bash access within a companion's workspace. Enforces:
 - Dangerous pattern blocklist (from Claude Code scaffold analysis)
+- argv-based execution (no shell) so metacharacters can't chain commands
 - Working directory confinement to companion workspace
 - Timeout enforcement
 - Output capture and truncation
@@ -12,19 +13,24 @@ The companion can create files, run scripts, and build artifacts that
 persist in their workspace.
 """
 
+from __future__ import annotations
+
 import asyncio
-import os
 import re
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from kintsugi.skills.base import (
     BaseSkillChip, SkillCapability, SkillContext, SkillDomain,
     SkillRequest, SkillResponse, EFEWeights,
 )
 
+# Defense-in-depth: rejected outright even though argv execution already
+# prevents shell metacharacters (";", "|", "&&", backticks, ...) from being
+# interpreted — they're just literal arguments to whatever program runs,
+# not command separators. This blocklist catches dangerous *programs*
+# being invoked directly (e.g. "sudo rm -rf /").
 DANGEROUS_PATTERNS = [
     r'\beval\b', r'\bexec\b', r'\bsudo\b', r'\bsu\b',
     r'\brm\s+-rf\s+/', r'\brm\s+-rf\s+~',
@@ -42,13 +48,17 @@ DANGEROUS_PATTERNS = [
     r'\bgit\s+push\s+--force\b', r'\bgit\s+reset\s+--hard\b',
 ]
 
-ALWAYS_ALLOW_PATTERNS = [
-    r'^ls\b', r'^head\b', r'^tail\b',
-    r'^wc\b', r'^echo\b', r'^date\b', r'^pwd\b',
-    r'^sort\b', r'^uniq\b',
-    r'^mkdir\b', r'^touch\b',
-    r'^which\b', r'^file\b', r'^stat\b', r'^du\b', r'^df\b',
-]
+# Binaries permitted to run without human approval. Checked against the
+# resolved program name (argv[0], with any path component stripped), never
+# against the raw command string — so no regex-prefix trick can smuggle a
+# different program through under a matching prefix.
+ALWAYS_ALLOW_BINARIES = frozenset({
+    "ls", "head", "tail",
+    "wc", "echo", "date", "pwd",
+    "sort", "uniq",
+    "mkdir", "touch",
+    "which", "file", "stat", "du", "df",
+})
 
 MAX_OUTPUT_CHARS = 8000
 DEFAULT_TIMEOUT = 30
@@ -59,15 +69,29 @@ class BashPermission:
     """Permission configuration for bash execution."""
     tier: str = "ask"  # "always_allow", "ask", "never_allow"
     reason: str = ""
+    argv: list[str] | None = None
 
 
 class BashSkillChip(BaseSkillChip):
-    """Sandboxed bash execution within a companion's workspace."""
+    """Sandboxed bash execution within a companion's workspace.
+
+    Commands are parsed with ``shlex`` and executed via argv
+    (``create_subprocess_exec``), never through a shell. This means shell
+    metacharacters are inert — a command like ``"echo hi; rm -rf /"``
+    parses into a single argv list (``["echo", "hi;", "rm", "-rf", "/"]``)
+    that is passed *entirely* to ``echo`` as literal arguments; there is no
+    shell present to interpret ``;`` as a command separator.
+
+    Only a small allowlist of read-only/workspace-local binaries may run
+    without explicit approval, and the subprocess environment is scrubbed
+    down to a minimal set of variables so host secrets (API keys, DB
+    credentials, bot tokens, etc.) are never inherited by child processes.
+    """
 
     name = "bash_executor"
     domain = SkillDomain.SHELL
     description = "Execute shell commands in the companion's workspace"
-    version = "1.0.0"
+    version = "1.1.0"
     capabilities = [SkillCapability.EXECUTE_SHELL, SkillCapability.WRITE_DATA]
     efe_weights = EFEWeights()
 
@@ -76,24 +100,53 @@ class BashSkillChip(BaseSkillChip):
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.timeout = timeout
         self._dangerous_re = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
-        self._safe_re = [re.compile(p) for p in ALWAYS_ALLOW_PATTERNS]
+
+    def _scrubbed_env(self) -> dict[str, str]:
+        """Minimal subprocess environment — no host secrets leak through."""
+        return {
+            "HOME": str(self.workspace),
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "LANG": "C.UTF-8",
+        }
 
     def classify_command(self, command: str) -> BashPermission:
-        """Classify a command into permission tiers."""
+        """Parse and classify a command into permission tiers.
+
+        Parsing happens once, here, and the resulting argv is carried on
+        the returned :class:`BashPermission` so ``handle`` executes exactly
+        what was classified — there's no window for the classification and
+        the execution to disagree about what the command actually is.
+        """
         stripped = command.strip()
 
         for pattern in self._dangerous_re:
             if pattern.search(stripped):
                 return BashPermission(
                     tier="never_allow",
-                    reason=f"Blocked by safety pattern: {pattern.pattern}"
+                    reason=f"Blocked by safety pattern: {pattern.pattern}",
                 )
 
-        for pattern in self._safe_re:
-            if pattern.match(stripped):
-                return BashPermission(tier="always_allow", reason="Safe read-only command")
+        try:
+            argv = shlex.split(stripped)
+        except ValueError as e:
+            return BashPermission(
+                tier="never_allow",
+                reason=f"Unparsable command (unbalanced quotes?): {e}",
+            )
 
-        return BashPermission(tier="ask", reason="Requires approval")
+        if not argv:
+            return BashPermission(tier="never_allow", reason="Empty command")
+
+        program = Path(argv[0]).name  # "/bin/ls" -> "ls", "./ls" -> "ls"
+
+        # Require a bare binary name (no path component) on the allowlist.
+        # Rejecting "./ls" or "/some/path/ls" prevents an attacker from
+        # reaching an always-allow decision via a same-named binary they
+        # planted elsewhere on disk.
+        if argv[0] == program and program in ALWAYS_ALLOW_BINARIES:
+            return BashPermission(tier="always_allow", reason="Safe read-only command", argv=argv)
+
+        return BashPermission(tier="ask", reason="Requires approval", argv=argv)
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         command = request.raw_input or request.parameters.get("command", "")
@@ -122,16 +175,22 @@ class BashSkillChip(BaseSkillChip):
                     data={"command": command, "reason": permission.reason},
                 )
 
+        argv = permission.argv
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workspace),
-                env={**os.environ, "HOME": str(self.workspace)},
+                env=self._scrubbed_env(),
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self.timeout
+            )
+        except FileNotFoundError:
+            return SkillResponse(
+                content=f"Command not found: `{argv[0]}`",
+                success=False,
             )
         except asyncio.TimeoutError:
             try:

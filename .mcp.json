@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kintsugi-memory": {
+      "command": "C:\\Users\\allis\\coalition kintsugi agent\\project-kintsugi\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "kintsugi.integrations.mcp_server"]
+    }
+  }
+}

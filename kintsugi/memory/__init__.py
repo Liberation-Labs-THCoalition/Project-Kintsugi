@@ -78,6 +78,65 @@ from kintsugi.memory.bdi_bridge import (
     Desire,
     Intention,
 )
+from kintsugi.memory.temporal_tree import (
+    TemporalTree,
+    TreeNode,
+    TimeScope,
+    ebbinghaus_decay,
+    temporal_iou,
+)
+from kintsugi.memory.temporal_scorer import (
+    QueryScoper,
+    ScoredResult as TemporalScoredResult,
+    ScoringWeights,
+    TemporalScorer,
+)
+from kintsugi.memory.dreamer_consolidator import DreamerConsolidator
+from kintsugi.memory.sira_enrichment import (
+    DomainMapper,
+    LLMEnricher,
+    MemoryEnricher,
+    QueryExpander,
+    SIRAIndex,
+)
+from kintsugi.memory.tgs_verification import (
+    GraphEdge,
+    GraphNode,
+    GraphResult,
+    GraphStore,
+    TextGraphVerifier,
+    TextStore,
+    VerificationReport,
+    VerifiedMemory,
+)
+from kintsugi.memory.tgs_adapter import (
+    KintsugiTextStore,
+    PostgresGraphStore,
+    create_kintsugi_verifier,
+)
+from kintsugi.memory.kg_extractor import (
+    ExtractedEntity,
+    ExtractedTriple,
+    ExtractionResult,
+    extract_entities,
+    extract_triples_cooccurrence,
+    run_extraction,
+)
+from kintsugi.memory.kg_store import (
+    insert_triple,
+    link_entity_to_memory,
+    process_memory_for_kg,
+    upsert_entity,
+)
+from kintsugi.memory.kg_retrieval import (
+    GraphRetrievalResult,
+    PPRConfig,
+    apply_catrag_weighting,
+    find_seed_nodes,
+    graph_retrieve,
+    load_adjacency,
+    personalized_pagerank,
+)
 
 __all__ = [
     # embeddings
@@ -137,4 +196,56 @@ __all__ = [
     "fib_interval",
     "SpacedRetrieval",
     "DueMemory",
+    # temporal_tree
+    "TemporalTree",
+    "TreeNode",
+    "TimeScope",
+    "ebbinghaus_decay",
+    "temporal_iou",
+    # temporal_scorer
+    "TemporalScorer",
+    "ScoringWeights",
+    "TemporalScoredResult",
+    "QueryScoper",
+    # dreamer_consolidator
+    "DreamerConsolidator",
+    # sira_enrichment
+    "SIRAIndex",
+    "LLMEnricher",
+    "DomainMapper",
+    "QueryExpander",
+    "MemoryEnricher",
+    # tgs_verification
+    "TextStore",
+    "GraphStore",
+    "GraphNode",
+    "GraphEdge",
+    "GraphResult",
+    "VerifiedMemory",
+    "VerificationReport",
+    "TextGraphVerifier",
+    # tgs_adapter
+    "KintsugiTextStore",
+    "PostgresGraphStore",
+    "create_kintsugi_verifier",
+    # kg_extractor
+    "ExtractedEntity",
+    "ExtractedTriple",
+    "ExtractionResult",
+    "extract_entities",
+    "extract_triples_cooccurrence",
+    "run_extraction",
+    # kg_store
+    "upsert_entity",
+    "insert_triple",
+    "link_entity_to_memory",
+    "process_memory_for_kg",
+    # kg_retrieval
+    "PPRConfig",
+    "GraphRetrievalResult",
+    "find_seed_nodes",
+    "load_adjacency",
+    "apply_catrag_weighting",
+    "personalized_pagerank",
+    "graph_retrieve",
 ]
