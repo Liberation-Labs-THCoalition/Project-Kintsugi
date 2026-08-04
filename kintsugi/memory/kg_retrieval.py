@@ -71,11 +71,11 @@ async def find_seed_nodes(
 
         if query_embedding is not None:
             fuzzy_stmt = text("""
-                SELECT id, 1 - (embedding <=> :qemb) AS similarity
+                SELECT id, 1 - (embedding <=> (:qemb)::vector) AS similarity
                 FROM kg_entities
                 WHERE org_id = :org_id
                   AND embedding IS NOT NULL
-                ORDER BY embedding <=> :qemb
+                ORDER BY embedding <=> (:qemb)::vector
                 LIMIT 3
             """).bindparams(org_id=org_id, qemb=str(query_embedding.tolist()))
 

@@ -47,11 +47,11 @@ class KintsugiTextStore:
         dense_results: list[ScoredResult] = []
         if query_embedding is not None:
             dense_stmt = text("""
-                SELECT mu.id, mu.content, 1 - (me.embedding <=> :qemb) AS score
+                SELECT mu.id, mu.content, 1 - (me.embedding <=> (:qemb)::vector) AS score
                 FROM memory_embeddings me
                 JOIN memory_units mu ON mu.id = me.memory_id
                 WHERE mu.org_id = :org_id
-                ORDER BY me.embedding <=> :qemb
+                ORDER BY me.embedding <=> (:qemb)::vector
                 LIMIT :limit
             """).bindparams(org_id=org_id, qemb=str(query_embedding), limit=n_results * 2)
             rows = await session.execute(dense_stmt)

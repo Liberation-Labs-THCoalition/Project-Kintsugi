@@ -31,10 +31,12 @@ async def upsert_entity(
     exists (same org + lowercase name), updates last_seen and increments
     mention_count.
     """
+    # name_lower is a Postgres GENERATED ALWAYS column (lower(name)) — it
+    # must not appear in the insert column list at all, not even with the
+    # "correct" value; Postgres computes and persists it itself.
     stmt = pg_insert(KGEntity.__table__).values(
         org_id=org_id,
         name=name,
-        name_lower=name.lower(),
         entity_type=entity_type,
         embedding=embedding,
     ).on_conflict_do_update(
