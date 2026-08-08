@@ -54,6 +54,10 @@ _TASK_TIER_MAP: dict[str, ModelTier] = {
 
 _COST_PER_1K: dict[str, tuple[float, float]] = {
     # (input_per_1k, output_per_1k)
+    "claude-haiku-4-5": (0.001, 0.005),
+    "claude-sonnet-4-5": (0.003, 0.015),
+    "claude-opus-4-5": (0.005, 0.025),
+    # legacy IDs kept for older configs
     "claude-3-5-haiku-20241022": (0.001, 0.005),
     "claude-sonnet-4-20250514": (0.003, 0.015),
     "claude-opus-4-20250514": (0.015, 0.075),

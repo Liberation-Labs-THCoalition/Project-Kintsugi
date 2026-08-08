@@ -42,6 +42,10 @@ class AnthropicClient:
     ----------
     api_key:
         Anthropic API key. Falls back to ``settings.ANTHROPIC_API_KEY``.
+    auth_token:
+        OAuth bearer token (e.g. from ``claude setup-token``). Falls back to
+        ``settings.CLAUDE_CODE_OAUTH_TOKEN``. Takes precedence over
+        ``api_key`` when both are present.
     model_router:
         Router for resolving model tiers to concrete IDs.
     cost_tracker:
@@ -51,16 +55,21 @@ class AnthropicClient:
     def __init__(
         self,
         api_key: str | None = None,
+        auth_token: str | None = None,
         model_router: ModelRouter | None = None,
         cost_tracker: CostTracker | None = None,
     ) -> None:
+        self._auth_token = auth_token or settings.CLAUDE_CODE_OAUTH_TOKEN
         self._api_key = api_key or settings.ANTHROPIC_API_KEY
-        if not self._api_key:
-            raise ValueError(
-                "No Anthropic API key configured. Set ANTHROPIC_API_KEY in environment."
-            )
-
-        self._client = AsyncAnthropic(api_key=self._api_key)
+        if self._auth_token:
+            self._client = AsyncAnthropic(auth_token=self._auth_token, api_key=None)
+        elif self._api_key:
+            self._client = AsyncAnthropic(api_key=self._api_key)
+        else:
+            # No explicit credential: let the SDK check ANTHROPIC_AUTH_TOKEN
+            # / ANTHROPIC_API_KEY itself. Fails at request time, not
+            # construction time, if neither is configured.
+            self._client = AsyncAnthropic()
         self._router = model_router or ModelRouter()
         self._cost_tracker = cost_tracker
 
@@ -100,14 +109,19 @@ class AnthropicClient:
 
         messages = [{"role": "user", "content": prompt}]
 
-        response = await self._client.messages.create(
-            model=model_id,
-            max_tokens=max_tokens,
-            system=system or "",
-            messages=messages,
-            temperature=temperature,
-            stop_sequences=stop_sequences or [],
-        )
+        kwargs: dict[str, Any] = {
+            "model": model_id,
+            "max_tokens": max_tokens,
+            "system": system or "",
+            "messages": messages,
+            "stop_sequences": stop_sequences or [],
+            "temperature": temperature,
+        }
+
+        response = await self._client.messages.create(**kwargs)
+
+        if response.stop_reason == "refusal":
+            logger.warning("Model %s refused the request", response.model)
 
         # Extract response text
         text = ""
@@ -288,6 +302,7 @@ def create_llm_client(
     """
     return AnthropicClient(
         api_key=settings.ANTHROPIC_API_KEY,
+        auth_token=settings.CLAUDE_CODE_OAUTH_TOKEN,
         model_router=ModelRouter(deployment_tier=settings.DEPLOYMENT_TIER),
         cost_tracker=cost_tracker,
     )
