@@ -3,6 +3,10 @@
     "kintsugi-memory": {
       "command": "C:\\Users\\allis\\coalition kintsugi agent\\project-kintsugi\\.venv\\Scripts\\python.exe",
       "args": ["-m", "kintsugi.integrations.mcp_server"]
+    },
+    "kintsugi-scaffold": {
+      "command": "C:\\Users\\allis\\coalition kintsugi agent\\project-kintsugi\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "kintsugi.mcp_server", "--org-id", "11111111-1111-1111-1111-111111111111"]
     }
   }
 }

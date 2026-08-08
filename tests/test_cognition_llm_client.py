@@ -32,7 +32,13 @@ class TestAuthPrecedence:
             mock_cls.assert_called_once_with(auth_token="settings-oauth-token", api_key=None)
 
     def test_api_key_used_when_no_oauth_token(self):
-        with patch("kintsugi.cognition.llm_client.AsyncAnthropic") as mock_cls:
+        # No explicit auth_token is passed, so this must not fall through to
+        # the *real* settings.CLAUDE_CODE_OAUTH_TOKEN (which may be genuinely
+        # populated in a real .env in this environment) — patch settings to
+        # isolate the test from whatever's actually on disk.
+        fake_settings = MagicMock(CLAUDE_CODE_OAUTH_TOKEN="", ANTHROPIC_API_KEY="")
+        with patch("kintsugi.cognition.llm_client.settings", fake_settings), \
+             patch("kintsugi.cognition.llm_client.AsyncAnthropic") as mock_cls:
             AnthropicClient(api_key="sk-explicit")
             mock_cls.assert_called_once_with(api_key="sk-explicit")
 

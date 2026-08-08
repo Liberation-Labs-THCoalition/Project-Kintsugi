@@ -175,13 +175,56 @@ YAML/TOML files in `kintsugi/config/personalities/`. See
 
 ---
 
-## MCP Server (Memory Tools for Claude Code)
+## MCP Servers
 
-This repo registers a real MCP server (`kintsugi/integrations/mcp_server.py`)
-via `.mcp.json`, exposing Kintsugi's memory system as tools inside a Claude
-Code session working in this directory: `kintsugi_memory_search`,
+Two separate MCP servers ship in this repo, for two different purposes —
+complementary, not competing. Both speak stdio and work with any
+MCP-compatible client (Claude Code, Claude Desktop, Hermes, etc.).
+
+### Agentic Scaffold (`kintsugi/mcp_server.py`)
+
+Exposes Kintsugi's BDI agent, ethical gates, and skill routing as tools,
+without replacing your existing workflow.
+
+Add to your `.claude/mcp.json` (or equivalent MCP client config):
+
+```json
+{
+  "mcpServers": {
+    "kintsugi": {
+      "command": "python",
+      "args": ["-m", "kintsugi.mcp_server", "--org-id", "<your-org-uuid>"]
+    }
+  }
+}
+```
+
+Requires the MCP SDK: `pip install mcp`
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `kintsugi_ask` | Route a message through BDI agent with ethical gates, PII redaction, and skill routing |
+| `kintsugi_plan` | Generate EFE-scored action candidates ranked by risk, ambiguity, and epistemic value |
+| `kintsugi_memory` | Query organizational memory for past interactions, decisions, and learned patterns — currently a stub; see the Memory Backend server below for the real implementation |
+| `kintsugi_skills` | List available skill chips with domains and capabilities |
+| `kintsugi_health` | Agent health check -- drift detection, belief coherence, active desires |
+
+**Resources:**
+
+- `kintsugi://<org-id>/beliefs` -- Active beliefs (constraints and learned patterns)
+- `kintsugi://<org-id>/desires` -- Mission goals and priorities
+
+**For AI clients:** read [`AGENT.md`](AGENT.md) for tool usage instructions, discipline gate behavior, and hard constraints.
+
+### Memory Backend (`kintsugi/integrations/mcp_server.py`)
+
+Exposes Kintsugi's actual memory system as tools: `kintsugi_memory_search`,
 `kintsugi_memory_store`, `kintsugi_memory_temporal_search`,
-`kintsugi_memory_events_recent`.
+`kintsugi_memory_events_recent`. This is the real CMA + knowledge-graph
+implementation that the scaffold server's `kintsugi_memory` stub is meant
+to eventually call into.
 
 Setup:
 
@@ -229,50 +272,6 @@ Organizations define their ethical constraints in `VALUES.json`:
 ```
 
 The system enforces these at runtime. They're not suggestions—they're hard constraints that self-modification cannot override.
-
----
-
-## MCP Server
-
-Plug Kintsugi into any MCP-compatible runtime -- Claude Code, Claude Desktop, Hermes, or any client that speaks the Model Context Protocol. The MCP server exposes Kintsugi's BDI agent, ethical gates, and skill routing as standard tools without replacing your existing workflow.
-
-### Setup
-
-Add to your `.claude/mcp.json` (or equivalent MCP client config):
-
-```json
-{
-  "mcpServers": {
-    "kintsugi": {
-      "command": "python",
-      "args": ["-m", "kintsugi.mcp_server", "--org-id", "<your-org-uuid>"]
-    }
-  }
-}
-```
-
-Requires the MCP SDK: `pip install mcp`
-
-### Tools
-
-| Tool | Description |
-|------|-------------|
-| `kintsugi_ask` | Route a message through BDI agent with ethical gates, PII redaction, and skill routing |
-| `kintsugi_plan` | Generate EFE-scored action candidates ranked by risk, ambiguity, and epistemic value |
-| `kintsugi_memory` | Query organizational memory for past interactions, decisions, and learned patterns |
-| `kintsugi_skills` | List available skill chips with domains and capabilities |
-| `kintsugi_health` | Agent health check -- drift detection, belief coherence, active desires |
-
-### Resources
-
-The server also exposes MCP resources:
-
-- `kintsugi://<org-id>/beliefs` -- Active beliefs (constraints and learned patterns)
-- `kintsugi://<org-id>/desires` -- Mission goals and priorities
-
-### For AI Clients
-
-If you are an AI connecting to this MCP server, read [`AGENT.md`](AGENT.md) for tool usage instructions, discipline gate behavior, and hard constraints.
 
 ---
 
