@@ -232,6 +232,50 @@ The system enforces these at runtime. They're not suggestions—they're hard con
 
 ---
 
+## MCP Server
+
+Plug Kintsugi into any MCP-compatible runtime -- Claude Code, Claude Desktop, Hermes, or any client that speaks the Model Context Protocol. The MCP server exposes Kintsugi's BDI agent, ethical gates, and skill routing as standard tools without replacing your existing workflow.
+
+### Setup
+
+Add to your `.claude/mcp.json` (or equivalent MCP client config):
+
+```json
+{
+  "mcpServers": {
+    "kintsugi": {
+      "command": "python",
+      "args": ["-m", "kintsugi.mcp_server", "--org-id", "<your-org-uuid>"]
+    }
+  }
+}
+```
+
+Requires the MCP SDK: `pip install mcp`
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `kintsugi_ask` | Route a message through BDI agent with ethical gates, PII redaction, and skill routing |
+| `kintsugi_plan` | Generate EFE-scored action candidates ranked by risk, ambiguity, and epistemic value |
+| `kintsugi_memory` | Query organizational memory for past interactions, decisions, and learned patterns |
+| `kintsugi_skills` | List available skill chips with domains and capabilities |
+| `kintsugi_health` | Agent health check -- drift detection, belief coherence, active desires |
+
+### Resources
+
+The server also exposes MCP resources:
+
+- `kintsugi://<org-id>/beliefs` -- Active beliefs (constraints and learned patterns)
+- `kintsugi://<org-id>/desires` -- Mission goals and priorities
+
+### For AI Clients
+
+If you are an AI connecting to this MCP server, read [`AGENT.md`](AGENT.md) for tool usage instructions, discipline gate behavior, and hard constraints.
+
+---
+
 ## Built By
 
 **[Liberation Labs / TH Coalition](https://github.com/Liberation-Labs-THCoalition)**

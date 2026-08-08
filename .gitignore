@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+.envrc
 *.egg-info/
 dist/
 build/
@@ -12,3 +14,6 @@ build/
 htmlcov/
 *.db
 *.sqlite3
+
+# Claude Code
+.claude/
