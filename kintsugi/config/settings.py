@@ -26,15 +26,21 @@ class Settings(BaseSettings):
     EMBEDDING_MODE: Literal["local", "api"] = "local"
     EMBEDDING_MODEL: str = "all-mpnet-base-v2"
 
-    # --- LLM Keys (optional) ---
+    # --- LLM auth ---
+    # Preferred: a long-lived OAuth token from `claude setup-token`, tied to
+    # a Claude Pro/Max/Team/Enterprise subscription (verified working via
+    # AsyncAnthropic(auth_token=...) this session). Falls back to a
+    # standard Console API key if unset.
+    CLAUDE_CODE_OAUTH_TOKEN: str = ""
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
 
     # --- Model routing ---
+    # Keys are tier slots (FAST/BALANCED/POWERFUL), not literal model families.
     MODEL_ROUTING: dict[str, str] = {
-        "haiku": "claude-3-5-haiku-20241022",
-        "sonnet": "claude-sonnet-4-20250514",
-        "opus": "claude-opus-4-20250514",
+        "haiku": "claude-haiku-4-5",
+        "sonnet": "claude-sonnet-4-5",
+        "opus": "claude-opus-4-5",
     }
 
     # --- Shadow / governance ---
@@ -66,6 +72,12 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+
+    # --- Memory: temporal tree (h-mem-temporal) ---
+    TEMPORAL_TREE_DB_PATH: str = "temporal_tree.db"
+
+    # --- Memory: knowledge graph (spaCy NER model for entity extraction) ---
+    KG_SPACY_MODEL: str = "en_core_web_md"
 
     @model_validator(mode="after")
     def _auto_shadow(self) -> "Settings":

@@ -41,10 +41,16 @@ from datetime import datetime, timezone
 from typing import Any
 import asyncio
 import logging
-import resource
 import signal
 import sys
 import traceback
+
+try:
+    import resource
+    _HAS_RESOURCE = True
+except ImportError:  # pragma: no cover - `resource` is POSIX-only (no Windows support)
+    resource = None  # type: ignore[assignment]
+    _HAS_RESOURCE = False
 
 from kintsugi.plugins.loader import LoadedPlugin, PluginState
 
@@ -616,6 +622,9 @@ class PluginSandbox:
         """
         old_limits = {}
 
+        if not _HAS_RESOURCE:
+            return old_limits
+
         try:
             # Set memory limit
             memory_bytes = self._policy.max_memory_mb * 1024 * 1024
@@ -645,6 +654,9 @@ class PluginSandbox:
         Args:
             old_limits: Dictionary of limits to restore.
         """
+        if not _HAS_RESOURCE:
+            return
+
         try:
             if 'memory' in old_limits:
                 resource.setrlimit(resource.RLIMIT_AS, old_limits['memory'])

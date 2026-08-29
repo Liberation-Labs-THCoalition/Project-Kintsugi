@@ -20,13 +20,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
 from kintsugi.cognition.proactive_advisor import (
     ProactiveAdvisor,
     ActivityRecord,
     Suggestion,
 )
+
+if TYPE_CHECKING:
+    from kintsugi.memory.dreamer_consolidator import DreamerConsolidator
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,7 @@ class DreamCycleReport:
     memories_archived: int = 0
     connections_found: int = 0
     suggestions: list[Suggestion] = field(default_factory=list)
+    temporal_consolidation: dict | None = None
     duration_seconds: float = 0.0
     errors: list[str] = field(default_factory=list)
 
@@ -92,6 +96,9 @@ class Dreamer:
             Signature: (prompt) -> str
         activity_source: Callable that returns recent activity records.
             Signature: (days) -> list[ActivityRecord]
+        temporal_consolidator: Optional DreamerConsolidator for the
+            SQLite-backed temporal tree (h-mem-temporal). When set, an
+            additional phase runs the tree's full consolidation cycle.
     """
 
     def __init__(
@@ -103,6 +110,7 @@ class Dreamer:
         consolidate_fn: Callable[..., Awaitable[list]] | None = None,
         llm_call: Callable[..., Awaitable[str]] | None = None,
         activity_source: Callable[..., list[ActivityRecord]] | None = None,
+        temporal_consolidator: DreamerConsolidator | None = None,
     ) -> None:
         self._config = config or DreamerConfig()
         self._memory_store = memory_store
@@ -111,6 +119,7 @@ class Dreamer:
         self._consolidate_fn = consolidate_fn
         self._llm_call = llm_call
         self._activity_source = activity_source
+        self._temporal_consolidator = temporal_consolidator
         self._advisor = ProactiveAdvisor(max_suggestions=self._config.max_suggestions)
 
     async def dream(self) -> DreamCycleReport:
@@ -161,6 +170,14 @@ class Dreamer:
         except Exception as e:
             report.errors.append(f"suggestions: {e}")
             logger.warning("Suggestion generation failed: %s", e)
+
+        # Phase 6 (optional): Temporal tree consolidation
+        if self._temporal_consolidator:
+            try:
+                report.temporal_consolidation = await self._temporal_consolidator.full_cycle()
+            except Exception as e:
+                report.errors.append(f"temporal: {e}")
+                logger.warning("Temporal consolidation failed: %s", e)
 
         report.duration_seconds = round(time.perf_counter() - t0, 2)
         logger.info("Dreamer cycle complete: %s", report.summary())

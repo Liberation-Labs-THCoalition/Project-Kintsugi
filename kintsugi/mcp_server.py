@@ -238,7 +238,7 @@ def create_server(org_id: str, config_path: str = "") -> "Server":
             "task": task,
             "domain": routing.skill_domain,
             "confidence": routing.confidence,
-            "model_tier": str(routing.model_tier),
+            "model_tier": routing.model_tier.value if hasattr(routing.model_tier, 'value') else str(routing.model_tier),
             "reasoning": routing.reasoning,
         }
 
@@ -257,14 +257,15 @@ def create_server(org_id: str, config_path: str = "") -> "Server":
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     async def _handle_skills(args: dict) -> list[TextContent]:
-        from kintsugi.skills import SKILL_REGISTRY
-        skills = []
-        for name, skill in SKILL_REGISTRY.items():
-            skills.append({
-                "name": name,
-                "domain": skill.domain,
-                "description": skill.description,
-            })
+        from kintsugi.skills import get_registry
+        from kintsugi.skills.bootstrap import register_builtin_chips
+
+        register_builtin_chips()  # idempotent; this process never went through main.py's lifespan
+        registry = get_registry()
+        skills = [
+            {"name": chip.name, "domain": chip.domain.value, "description": chip.description}
+            for chip in registry
+        ]
 
         return [TextContent(type="text", text=json.dumps({"skills": skills}, indent=2))]
 
@@ -325,7 +326,8 @@ def create_server(org_id: str, config_path: str = "") -> "Server":
 async def main(org_id: str):
     server = create_server(org_id)
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream)
+        init_options = server.create_initialization_options()
+        await server.run(read_stream, write_stream, init_options)
 
 
 if __name__ == "__main__":
