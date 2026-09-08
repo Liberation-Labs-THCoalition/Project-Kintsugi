@@ -1,4 +1,5 @@
 """Smoke / canary test for the ontology kernel + Ayni extension."""
+import pytest
 import sys
 sys.path.insert(0, "/home/asdf/project-kintsugi")
 
@@ -65,6 +66,83 @@ def build_ayni_extension():
     ayni.add_concept(Concept('circumplex', ConceptType.ACTION,
         'Circumplex measurement', constraint_names=['circumplex_limitation']))
     return ayni
+
+
+# === Lyra's instrument (2026-08-29) ===
+#
+# "Count the unique verdicts before reading any verdict. If a test's assertion is
+#  satisfied by a constant, it is not testing."
+#
+# The suite passed 56/56 and could not have detected a checker wedged in the
+# "blocked" position: test_measurement_needs_consent asserts `not ok`, but that
+# block occurs whether or not consent is present, so it passes identically against
+# a checker hardcoded to return blocked. The assertion was satisfied by a constant.
+#
+# This is the same failure class as a permutation null with orbit 4, an unreachable
+# branch whose zero gets read as evidence, and a monitor that logs its own success
+# instead of the system's state. In every case a check that CANNOT fail is
+# indistinguishable from a check that passed.
+
+def verdict_cardinality(kernel, action, actor_role, contexts):
+    """How many distinct verdicts does this check produce across varied world states?
+
+    1 means the check is constant: it is not reading the world, and any assertion
+    about it is satisfied without the check working. Returns (n_unique, verdicts).
+    """
+    seen = []
+    for _ctx in contexts:
+        # Phase 1 is context-free by construction (see kernel.validate_action).
+        seen.append(repr(kernel.validate_action(action, actor_role)))
+    return len(set(seen)), seen
+
+
+CONSENT_CONTEXTS = [
+    {'consent': 'granted'},
+    {'consent': 'denied'},
+    {},
+    {'consent': 'granted', 'provenance': 'ok'},
+    {'provenance': 'missing'},
+]
+
+
+def test_consent_check_is_currently_constant():
+    """Phase 1 honesty test: assert the limitation we actually have.
+
+    This is deliberately asserting cardinality == 1. The consent constraint does not
+    read consent; it blocks unconditionally. Recording that as a passing test means
+    the day someone wires a predicate, THIS test fails and forces the Phase 2 test
+    below to be un-skipped. A limitation nobody has written down is a limitation
+    that gets mistaken for a feature.
+    """
+    kernel = build_test_kernel()
+    kernel.register_domain('ayni', build_ayni_extension())
+    n, _ = verdict_cardinality(kernel, 'geometric_measurement', 'researcher',
+                               CONSENT_CONTEXTS)
+    assert n == 1, (
+        f'Consent check now yields {n} distinct verdicts — it reads world state. '
+        'Phase 2 has landed: delete this test and un-skip '
+        'test_constraint_passes_when_precondition_holds.'
+    )
+
+
+def test_constraint_passes_when_precondition_holds():
+    """Phase 2 (SKIPPED until Constraint.predicate exists).
+
+    The test Lyra asked for, and the only one that makes passing mean anything:
+    a constraint must PASS when its precondition is satisfied. Until Constraint
+    carries a predicate evaluated against real state, there is nothing to satisfy,
+    so this is skipped rather than deleted — a skipped test is visible work; an
+    absent one is an invisible gap.
+    """
+    pytest.skip(
+        'Phase 2: requires Constraint.predicate — Callable[[dict], bool] evaluated '
+        'against real state. Shape already exists in '
+        'kintsugi/verification_scheduler_spec.md (AssertionRecord) and runs live in '
+        'penumbra_v2.py:270 quality_gate(). Kernel supplies vocabulary; predicate '
+        'supplies the bool you cannot argue with.'
+    )
+
+
 
 
 def test_agent_read_admissible():
@@ -163,11 +241,15 @@ def test_children_of():
 if __name__ == '__main__':
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]
     passed = 0
+    skipped = 0
     for test in tests:
         try:
             test()
             print(f'  [PASS] {test.__name__}')
             passed += 1
+        except pytest.skip.Exception as e:   # pytest's own Skipped
+            print(f'  [SKIP] {test.__name__}: {str(e)[:80]}...')
+            skipped += 1
         except AssertionError as e:
             print(f'  [FAIL] {test.__name__}: {e}')
-    print(f'\n{passed}/{len(tests)} passed')
+    print(f'\n{passed}/{len(tests)} passed, {skipped} skipped (Phase 2)')

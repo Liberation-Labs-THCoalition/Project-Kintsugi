@@ -210,11 +210,24 @@ class OntologyKernel:
 
     # === VALIDATION ===
 
-    def validate_action(self, action: str, actor_role: str = "",
-                        context: dict[str, Any] | None = None) -> tuple[bool, list[str]]:
+    def validate_action(self, action: str,
+                        actor_role: str = "") -> tuple[bool, list[str]]:
         """Check if an action is ontologically admissible.
 
         Returns (admissible, violations).
+
+        NOTE — this signature previously accepted a `context: dict` that the body
+        never read. `_check_action_constraint` takes no context, so every
+        `scope="pre_action"` constraint returned the same verdict regardless of
+        world state: measured at 1 unique verdict across 5 distinct contexts for
+        geometric_measurement, mutating_action, and read_action alike. A parameter
+        that cannot change an answer is a promise the implementation does not keep,
+        and it reads as capability to anyone calling it.
+
+        The parameter is removed rather than fixed here because fixing it is Phase 2:
+        `Constraint` has no predicate field, so there is nothing for context to be
+        evaluated against. It returns when `Constraint.predicate` lands.
+        (Lyra, 2026-08-29.)
         """
         violations = []
 
@@ -254,12 +267,14 @@ class OntologyKernel:
         return ""
 
     def filter_admissible(self, candidates: Sequence[str],
-                          actor_role: str = "",
-                          context: dict[str, Any] | None = None) -> list[str]:
-        """Filter a list of skill/action candidates to only admissible ones."""
+                          actor_role: str = "") -> list[str]:
+        """Filter a list of skill/action candidates to only admissible ones.
+
+        Context-free for the same reason as validate_action; returns in Phase 2.
+        """
         admissible = []
         for candidate in candidates:
-            ok, violations = self.validate_action(candidate, actor_role, context)
+            ok, violations = self.validate_action(candidate, actor_role)
             if ok:
                 admissible.append(candidate)
             else:
