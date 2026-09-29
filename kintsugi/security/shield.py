@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -83,10 +83,10 @@ class BudgetEnforcer:
 
     @staticmethod
     def _next_midnight() -> datetime:
+        """The next UTC midnight after now. `day + 1` raised ValueError on the
+        last day of every month; timedelta rolls months and years over."""
         now = datetime.now(timezone.utc)
-        return now.replace(hour=0, minute=0, second=0, microsecond=0).__class__(
-            now.year, now.month, now.day + 1, tzinfo=timezone.utc
-        ) if now.hour or now.minute or now.second or now.microsecond else now
+        return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
 
     def _maybe_reset_daily(self) -> None:
         now = datetime.now(timezone.utc)
