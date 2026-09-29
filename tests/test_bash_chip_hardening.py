@@ -137,3 +137,49 @@ def test_the_direct_route_strips_reserved_parameters(monkeypatch):
                                         json={"raw_input": "x", "parameters": {"approved": True, "k": 1}})
     assert r.status_code == 200
     assert echo.seen == {"k": 1}
+
+
+# ---- Vera's verification, 2026-09-29 ----------------------------------------
+
+class _RenamedShell(BashSkillChip):
+    name = "renamed_shell"
+
+
+def test_the_route_guard_keys_on_capability_not_name(tmp_path, spawns, monkeypatch):
+    chip = _RenamedShell(workspace_dir=str(tmp_path / "ws"))
+    r = _client(monkeypatch, chip).post("/api/v1/skills/renamed_shell/execute", json={"raw_input": "pwd"})
+    assert r.status_code == 403
+    assert spawns["exec"] == [] and spawns["shell"] == []
+
+
+def test_an_option_value_cannot_climb_out_of_the_workspace(chip):
+    assert chip.classify_command("sort -T.. notes.txt").tier == "ask"
+
+
+def test_date_takes_only_a_format(chip):
+    assert chip.classify_command("date +%Y").tier == "always_allow"
+    assert chip.classify_command("date -s 2020-01-01").tier == "ask"
+
+
+def test_the_child_gets_a_pinned_path_and_no_stdin(chip, spawns):
+    asyncio.run(chip.handle(_req("pwd"), _ctx()))
+    kw = spawns["exec"][0][1]
+    assert kw["env"]["PATH"] == "/usr/bin:/bin"
+    assert kw["stdin"] == asyncio.subprocess.DEVNULL
+
+
+def test_agent_v2_guards_before_it_runs_anything():
+    """agent_v2 cannot be imported yet (a missing _get_llm_client), so this
+    checks its structure: the guard call must come before every place the
+    handler runs a chip, composed or single."""
+    import ast
+    import pathlib
+    src = pathlib.Path(skills_route.__file__).with_name("agent_v2.py").read_text()
+    for fn in ast.walk(ast.parse(src)):
+        if isinstance(fn, ast.AsyncFunctionDef) and "execute_dag" in ast.unparse(fn):
+            calls = [(c.lineno, ast.unparse(c.func)) for c in ast.walk(fn) if isinstance(c, ast.Call)]
+            guard = [ln for ln, name in calls if name.endswith("refuse_shell_capable")]
+            runs = [ln for ln, name in calls if name.endswith(("execute_dag", ".handle"))]
+            assert guard and runs and min(guard) < min(runs), (guard, runs)
+            return
+    raise AssertionError("agent_v2 handler not found")

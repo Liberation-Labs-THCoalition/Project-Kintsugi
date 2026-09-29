@@ -24,6 +24,7 @@ from kintsugi.cognition.enhanced_orchestrator import EnhancedOrchestrator
 from kintsugi.skills.registry import get_registry
 from kintsugi.skills.capability_tree import CapabilityTree
 from kintsugi.skills.dag import DAGExecutor
+from kintsugi.api.guards import refuse_shell_capable
 from kintsugi.skills.base import SkillContext, SkillRequest
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,9 @@ async def agent_message_v2(req: AgentRequest) -> AgentResponse:
     )
 
     registry = get_registry()
+    # Before either path runs anything: a chat message must not reach a shell
+    # on an unauthenticated route, composed or single (Vera, 2026-09-29).
+    refuse_shell_capable(registry, decision.skill_names, "agent v2")
 
     if decision.is_composed and decision.dag:
         context = SkillContext(
