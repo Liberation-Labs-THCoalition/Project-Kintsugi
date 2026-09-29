@@ -275,3 +275,14 @@ class TestConsensusGateEscalate:
         # Escalated is not terminal, so approve should work
         result = gate.approve(item.id, "alice")
         assert result.status == ConsentStatus.APPROVED
+
+
+class TestDistinctApprovers:
+    def test_same_approver_twice_does_not_meet_a_two_approval_threshold(self):
+        gate = ConsensusGate()
+        item = gate.submit("org1", ConsentCategory.FINANCIAL, "t", {})
+        gate.approve(item.id, "alice")
+        result = gate.approve(item.id, "alice")
+        assert result.status == ConsentStatus.PENDING
+        result = gate.approve(item.id, "bob")
+        assert result.status == ConsentStatus.APPROVED and result.resolved_by == "bob"
