@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from kintsugi.plugins.loader import PluginLoader, PluginLoadError
 from kintsugi.plugins.registry import PluginRegistry
-from kintsugi.skills.base import SkillContext, SkillRequest
+from kintsugi.skills.base import SkillCapability, SkillContext, SkillRequest
 from kintsugi.skills.registry import get_registry
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,11 @@ def _get_plugin_machinery() -> tuple[PluginLoader, PluginRegistry]:
     if _plugin_registry is None:
         _plugin_registry = PluginRegistry()
     return _plugin_loader, _plugin_registry
+
+
+# Parameters only the server may set. A caller-supplied "approved" used to
+# authorize BashSkillChip's approval tier (Vera, 2026-09-24).
+RESERVED_PARAMETERS = frozenset({"approved"})
 
 
 class ExecuteSkillRequest(BaseModel):
@@ -114,12 +119,22 @@ async def execute_skill(skill_name: str, body: ExecuteSkillRequest) -> dict:
     chip = get_registry().get(skill_name)
     if chip is None:
         raise HTTPException(status_code=404, detail=f"unknown skill {skill_name!r}")
+    # No route authenticates yet, so no one reaching this port gets a shell.
+    # Re-enable only behind auth (Vera's order: strip approval, consensus, auth).
+    if SkillCapability.EXECUTE_SHELL in chip.capabilities:
+        raise HTTPException(status_code=403,
+                            detail=f"direct execution of {skill_name!r} is disabled: "
+                                   "shell-capable skills need authentication, which this API does not have yet")
 
+    reserved = RESERVED_PARAMETERS & set(body.parameters)
+    if reserved:
+        logger.warning("stripped reserved parameters %s from a direct execution of %s",
+                       sorted(reserved), skill_name)
     request = SkillRequest(
         intent=body.intent or skill_name,
         entities=body.entities,
         raw_input=body.raw_input,
-        parameters=body.parameters,
+        parameters={k: v for k, v in body.parameters.items() if k not in RESERVED_PARAMETERS},
     )
     context = SkillContext(
         org_id=body.org_id,
