@@ -24,6 +24,7 @@ from kintsugi.cognition.enhanced_orchestrator import EnhancedOrchestrator
 from kintsugi.skills.registry import get_registry
 from kintsugi.skills.capability_tree import CapabilityTree
 from kintsugi.skills.dag import DAGExecutor
+from kintsugi.api.auth import Principal, require_principal, resolve_org
 from kintsugi.api.guards import refuse_shell_capable
 from kintsugi.skills.base import SkillContext, SkillRequest
 
@@ -70,8 +71,9 @@ def _load_bdi_context() -> tuple[list, list]:
 
 
 @router.post("/message", response_model=AgentResponse)
-async def agent_message_v2(req: AgentRequest) -> AgentResponse:
+async def agent_message_v2(req: AgentRequest, principal: Principal = Depends(require_principal)) -> AgentResponse:
     """Enhanced message handling with tree discovery and DAG composition."""
+    req.org_id = resolve_org(principal, req.org_id)   # the key's org, used everywhere below (step 3)
 
     redaction = _redactor.redact(req.message)
     redacted_text = redaction.redacted_text

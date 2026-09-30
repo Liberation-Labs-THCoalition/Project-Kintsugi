@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kintsugi.api.auth import Principal, audit, require_admin, require_principal, resolve_org
 from kintsugi.config.values_loader import load_from_template, merge_with_defaults
 from kintsugi.config.values_schema import OrganizationValues
 from kintsugi.db import get_session
@@ -24,8 +25,17 @@ AVAILABLE_TEMPLATES = ["mutual_aid", "nonprofit_501c3", "cooperative", "advocacy
 # ---------------------------------------------------------------------------
 
 class ValuesPayload(BaseModel):
-    org_id: uuid.UUID
+    org_id: uuid.UUID | None = None  # the key decides the org; a different value here is refused
     values: dict
+
+
+def org_uuid(principal: Principal, requested: object | None) -> uuid.UUID:
+    """The key's org as a database UUID (these routes are DB-backed)."""
+    org = resolve_org(principal, requested)
+    try:
+        return uuid.UUID(org)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="this API key's org is not a database organization")
 
 
 class InitPayload(BaseModel):
@@ -45,10 +55,12 @@ class InitResponse(BaseModel):
 
 @router.get("/values")
 async def get_values(
-    org_id: uuid.UUID = Query(...),
+    org_id: uuid.UUID | None = Query(None),
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_principal),
 ) -> dict:
-    """Return the OrganizationValues document for an org."""
+    """Return the OrganizationValues document for the caller's org."""
+    org_id = org_uuid(principal, org_id)
     result = await session.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one_or_none()
     if org is None:
@@ -66,24 +78,27 @@ async def get_values(
 async def put_values(
     payload: ValuesPayload,
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_admin),
 ) -> dict:
-    """Validate and persist a full OrganizationValues document."""
+    """Validate and persist a full OrganizationValues document for the caller's org (admin only, audited)."""
+    target = org_uuid(principal, payload.org_id)
     # Validate against schema
     try:
         validated = OrganizationValues.model_validate(payload.values)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors())
 
-    result = await session.execute(select(Organization).where(Organization.id == payload.org_id))
+    result = await session.execute(select(Organization).where(Organization.id == target))
     org = result.scalar_one_or_none()
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
 
+    audit(principal, "config.values", org=str(target))
     org.values_json = validated.model_dump()
     await session.commit()
     await session.refresh(org)
 
-    return {"org_id": str(payload.org_id), "values": org.values_json}
+    return {"org_id": str(target), "values": org.values_json}
 
 
 @router.get("/templates")
@@ -105,8 +120,11 @@ async def get_template(org_type: str) -> dict:
 async def init_org(
     payload: InitPayload,
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_admin),
 ) -> InitResponse:
-    """Create a new Organization and initialise its values from a template."""
+    """Create a new Organization and initialise its values from a template (admin only, audited). Its first key comes
+    from the CLI: no HTTP route mints keys."""
+    audit(principal, "config.init", org_name=payload.org_name, org_type=payload.org_type)
     if payload.org_type not in AVAILABLE_TEMPLATES:
         raise HTTPException(status_code=404, detail=f"Unknown template: {payload.org_type}")
 

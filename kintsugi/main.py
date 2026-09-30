@@ -6,12 +6,13 @@ import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from kintsugi import __version__
+from kintsugi.api.auth import require_principal
 from kintsugi.config.settings import settings
 
 logger = logging.getLogger("kintsugi")
@@ -42,6 +43,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "database unavailable (%s) — running without persistent memory", exc
         )
 
+    if settings.KINTSUGI_AUTH_DISABLED:
+        logger.warning("KINTSUGI_AUTH_DISABLED is set: every request not from loopback will be refused")
+
     yield
 
     if app.state.db_available:
@@ -54,17 +58,25 @@ app = FastAPI(
     title="Kintsugi Engine",
     version=__version__,
     lifespan=lifespan,
+    # The docs enumerate every route, so they are off unless PUBLIC_DOCS is set (step 3).
+    docs_url="/docs" if settings.PUBLIC_DOCS else None,
+    redoc_url="/redoc" if settings.PUBLIC_DOCS else None,
+    openapi_url="/openapi.json" if settings.PUBLIC_DOCS else None,
 )
 
+# Bearer keys need no credentials mode, and only these two request headers matter.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # --- Route registration (graceful if modules missing) ---
+# Every router is included behind the principal dependency except the ones listed here; a route-table test fails if
+# any route escapes it (step 3).
+PUBLIC_ROUTE_MODULES = {"kintsugi.api.routes.health"}
 _route_modules = [
     # Legacy org-scoped routes (DB-backed)
     "kintsugi.api.routes.health",
@@ -85,7 +97,8 @@ for _mod_path in _route_modules:
         import importlib
 
         _mod = importlib.import_module(_mod_path)
-        app.include_router(_mod.router)
+        _deps = [] if _mod_path in PUBLIC_ROUTE_MODULES else [Depends(require_principal)]
+        app.include_router(_mod.router, dependencies=_deps)
     except (ImportError, AttributeError) as _exc:
         logger.warning("route module %s not loaded: %s", _mod_path, _exc)
 
@@ -94,7 +107,7 @@ if settings.DASHBOARD_ENABLED:
     try:
         from kintsugi.dashboard import router as dashboard_router, static_dir
 
-        app.include_router(dashboard_router)
+        app.include_router(dashboard_router, dependencies=[Depends(require_principal)])
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
         @app.get("/", include_in_schema=False)

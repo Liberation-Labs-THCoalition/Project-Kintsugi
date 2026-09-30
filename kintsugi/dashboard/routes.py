@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from kintsugi.agents.manager import get_agent_manager
+from kintsugi.api.auth import Principal, audit, require_admin
 from kintsugi.agents.personality import get_personality_registry
 from kintsugi.agents.sessions import get_session_manager
 from kintsugi.oracle.monitor import get_oracle_monitor
@@ -21,7 +22,10 @@ _here = Path(__file__).resolve().parent
 static_dir = _here / "static"
 templates = Jinja2Templates(directory=str(_here / "templates"))
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"], include_in_schema=False)
+# An operator console: its partials show every org's agents and sessions, and its actions change state, so the whole
+# dashboard is admin-only (step 3).
+router = APIRouter(prefix="/dashboard", tags=["dashboard"], include_in_schema=False,
+                   dependencies=[Depends(require_admin)])
 
 # The dashboard's own chat sessions, one per personality, created lazily.
 _chat_sessions: dict[str, str] = {}
@@ -86,8 +90,10 @@ async def action_stop(request: Request, agent_id: str) -> HTMLResponse:
 
 
 @router.post("/actions/oracle-mode", response_class=HTMLResponse)
-async def action_oracle_mode(request: Request, mode: str = Form("observe")) -> HTMLResponse:
+async def action_oracle_mode(request: Request, mode: str = Form("observe"),
+                             principal: Principal = Depends(require_admin)) -> HTMLResponse:
     if mode in ("off", "observe", "enforce"):
+        audit(principal, "oracle.mode", old=get_oracle_monitor().mode, new=mode, via="dashboard")
         get_oracle_monitor().mode = mode
     return templates.TemplateResponse(request, "partials/oracle.html", _context(request))
 

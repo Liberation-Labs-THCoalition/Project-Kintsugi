@@ -122,7 +122,8 @@ def _client(monkeypatch, chip):
     monkeypatch.setattr(skills_route, "get_registry", lambda: _Registry(chip))
     app = FastAPI()
     app.include_router(skills_route.router)
-    return TestClient(app)
+    from tests.conftest import mint
+    return TestClient(app, headers=mint("member"))   # a real member key: shell is refused all the same
 
 
 def test_the_direct_route_refuses_shell_capable_chips(chip, spawns, monkeypatch):
