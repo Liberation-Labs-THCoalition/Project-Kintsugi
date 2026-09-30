@@ -899,3 +899,33 @@ class TestShieldIntegration:
         # Egress should fail (empty allowlist = deny all)
         verdict = shield.check_action("test", url="https://example.com")
         assert verdict.decision == ShieldDecision.BLOCK
+
+
+class TestNextMidnight:
+    """BudgetEnforcer._next_midnight() is the next UTC midnight after now, across month and year ends."""
+
+    @staticmethod
+    def _at(monkeypatch, when):
+        import kintsugi.security.shield as shield_mod
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return when if tz is None else when.astimezone(tz)
+
+        monkeypatch.setattr(shield_mod, "datetime", _Frozen)
+
+    @pytest.mark.parametrize("now, expected", [
+        (datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc), datetime(2026, 9, 16, tzinfo=timezone.utc)),
+        (datetime(2026, 9, 30, 15, 0, tzinfo=timezone.utc), datetime(2026, 10, 1, tzinfo=timezone.utc)),
+        (datetime(2026, 2, 28, 23, 59, 59, tzinfo=timezone.utc), datetime(2026, 3, 1, tzinfo=timezone.utc)),
+        (datetime(2026, 12, 31, 23, 0, tzinfo=timezone.utc), datetime(2027, 1, 1, tzinfo=timezone.utc)),
+        (datetime(2026, 9, 15, 0, 0, tzinfo=timezone.utc), datetime(2026, 9, 16, tzinfo=timezone.utc)),
+    ], ids=["mid-month", "month-end", "february-end", "year-end", "exactly-midnight"])
+    def test_rolls_over(self, monkeypatch, now, expected):
+        self._at(monkeypatch, now)
+        assert BudgetEnforcer._next_midnight() == expected
+
+    def test_shield_constructs_on_the_last_day_of_a_month(self, monkeypatch):
+        self._at(monkeypatch, datetime(2026, 9, 30, 18, 0, tzinfo=timezone.utc))
+        assert Shield(ShieldConfig()).budget.daily_reset_at == datetime(2026, 10, 1, tzinfo=timezone.utc)

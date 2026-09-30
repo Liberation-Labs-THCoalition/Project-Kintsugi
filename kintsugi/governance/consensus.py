@@ -132,7 +132,8 @@ class ConsensusGate:
         item = self._get_or_raise(item_id)
         self._assert_actionable(item, "approve")
 
-        item._approvals.append(approver)
+        if approver not in item._approvals:   # an approver counts once, however often they approve
+            item._approvals.append(approver)
         threshold = self._config.approval_thresholds.get(item.category, 1)
         if len(item._approvals) >= threshold:
             item.status = ConsentStatus.APPROVED
