@@ -126,6 +126,24 @@ class CallableOracleHook:
         )
 
 
+def check_hook_url(url: str) -> None:
+    """An Oracle hook URL must be https, or http to a loopback host. Every agent turn is posted there."""
+    from ipaddress import ip_address
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
+    host = u.hostname or ""
+    try:
+        loopback = ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if u.scheme == "https" and host:
+        return
+    if u.scheme == "http" and loopback:
+        return
+    raise ValueError(f"Oracle hook URL must be https, or http to loopback: {url!r}")
+
+
 class HTTPOracleHook:
     """POST each turn to a running Oracle harness.
 
@@ -141,13 +159,15 @@ class HTTPOracleHook:
     name = "oracle-http"
 
     def __init__(self, endpoint: str, timeout: float = 5.0) -> None:
+        check_hook_url(endpoint)
         self.endpoint = endpoint
         self.timeout = timeout
 
     async def review(self, turn: AgentTurn) -> OracleVerdict:
         start = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # Never follow a redirect: an allowlisted host must not be able to bounce agent turns elsewhere.
+            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=False) as client:
                 resp = await client.post(self.endpoint, json=turn.to_dict())
                 resp.raise_for_status()
                 payload = resp.json()

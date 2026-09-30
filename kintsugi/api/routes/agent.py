@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kintsugi.api.auth import Principal, require_principal, resolve_org
 from kintsugi.db import get_session
 from kintsugi.models.base import Organization, TemporalMemory
 from kintsugi.security.monitor import SecurityMonitor
@@ -66,7 +67,7 @@ def _get_orchestrator() -> Orchestrator:
 
 class AgentRequest(BaseModel):
     message: str
-    org_id: str
+    org_id: str | None = None  # the key decides the org; a different value here is refused (step 3)
     context: dict = {}
 
 
@@ -101,7 +102,9 @@ class TemporalListResponse(BaseModel):
 async def agent_message(
     req: AgentRequest,
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_principal),
 ) -> AgentResponse:
+    req.org_id = resolve_org(principal, req.org_id)   # the key's org, used everywhere below
     # 1. Validate org_id
     try:
         org_uuid = uuid.UUID(req.org_id)
@@ -234,11 +237,13 @@ provide actionable guidance. If you need more information, ask clarifying questi
 
 @router.get("/temporal", response_model=TemporalListResponse)
 async def get_temporal_events(
-    org_id: str = Query(..., description="Organization UUID"),
+    org_id: str | None = Query(None, description="Organization UUID (defaults to the API key's)"),
     limit: int = Query(20, ge=1, le=200),
     category: Optional[str] = Query(None, description="Filter by category"),
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_principal),
 ) -> TemporalListResponse:
+    org_id = resolve_org(principal, org_id)
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:

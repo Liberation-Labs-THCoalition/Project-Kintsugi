@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from kintsugi.agents.events import get_event_bus
+from kintsugi.api.auth import require_admin
 
-router = APIRouter(prefix="/api/v1/events", tags=["events"])
+# Events carry no org, so they can't be filtered to the caller's: admin-only until they do (step 3).
+router = APIRouter(prefix="/api/v1/events", tags=["events"], dependencies=[Depends(require_admin)])
 
 
 @router.get("/recent")

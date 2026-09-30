@@ -9,9 +9,9 @@ from kintsugi.main import app
 
 
 @pytest.fixture
-async def client():
+async def client(admin_headers):
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", headers=admin_headers) as c:
         yield c
 
 

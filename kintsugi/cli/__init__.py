@@ -77,11 +77,18 @@ plugin_app = typer.Typer(
     no_args_is_help=True,
 )
 
+keys_app = typer.Typer(
+    name="keys",
+    help="Per-org API keys: the only way to mint one (no HTTP route can)",
+    no_args_is_help=True,
+)
+
 # Register sub-commands
 app.add_typer(security_app, name="security")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(config_app, name="config")
 app.add_typer(plugin_app, name="plugin")
+app.add_typer(keys_app, name="keys")
 
 
 def version_callback(value: bool) -> None:
@@ -492,6 +499,7 @@ def tune(
 # These are imported at the end to avoid circular imports
 def _register_subcommands() -> None:
     """Register all subcommand modules."""
+    from kintsugi.cli import keys  # noqa: F401  (first: an ImportError below must not cost the operator key minting)
     from kintsugi.cli import security  # noqa: F401
     from kintsugi.cli import doctor  # noqa: F401
     from kintsugi.cli import config  # noqa: F401
@@ -505,6 +513,7 @@ __all__ = [
     "doctor_app",
     "config_app",
     "plugin_app",
+    "keys_app",
     "console",
     "err_console",
     "__version__",

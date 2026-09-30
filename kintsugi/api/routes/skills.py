@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from kintsugi.api.auth import Principal, audit, require_admin, require_principal, resolve_org
 from kintsugi.plugins.loader import PluginLoader, PluginLoadError
 from kintsugi.plugins.registry import PluginRegistry
 from kintsugi.api.guards import refuse_shell_capable
@@ -42,8 +43,8 @@ RESERVED_PARAMETERS = frozenset({"approved"})
 class ExecuteSkillRequest(BaseModel):
     intent: str = ""
     raw_input: str = Field(min_length=1)
-    org_id: str = "default"
-    user_id: str = "api"
+    org_id: str | None = None  # the key decides the org; a different value here is refused
+    user_id: str = "api"       # audit metadata; grants nothing
     entities: dict[str, Any] = {}
     parameters: dict[str, Any] = {}
 
@@ -63,7 +64,9 @@ async def list_plugins() -> dict:
 
 
 @router.post("/plugins/{plugin_name}/load")
-async def load_plugin(plugin_name: str) -> dict:
+async def load_plugin(plugin_name: str, principal: Principal = Depends(require_admin)) -> dict:
+    """Loading a plugin loads code: admin-only, audited."""
+    audit(principal, "plugin.load", plugin=plugin_name)
     loader, plugin_registry = _get_plugin_machinery()
     try:
         loaded = loader.load(plugin_name)
@@ -74,8 +77,9 @@ async def load_plugin(plugin_name: str) -> dict:
 
 
 @router.post("/plugins/{plugin_name}/reload")
-async def reload_plugin(plugin_name: str) -> dict:
-    """Hot-swap: unload the plugin and reload it from disk."""
+async def reload_plugin(plugin_name: str, principal: Principal = Depends(require_admin)) -> dict:
+    """Hot-swap: unload the plugin and reload it from disk. Admin-only, audited."""
+    audit(principal, "plugin.reload", plugin=plugin_name)
     loader, plugin_registry = _get_plugin_machinery()
     try:
         plugin_registry.unregister(plugin_name)
@@ -87,7 +91,8 @@ async def reload_plugin(plugin_name: str) -> dict:
 
 
 @router.delete("/plugins/{plugin_name}")
-async def unload_plugin(plugin_name: str) -> dict:
+async def unload_plugin(plugin_name: str, principal: Principal = Depends(require_admin)) -> dict:
+    audit(principal, "plugin.unload", plugin=plugin_name)
     loader, plugin_registry = _get_plugin_machinery()
     plugin_registry.unregister(plugin_name)
     loader.unload(plugin_name)
@@ -111,7 +116,8 @@ async def get_skill(skill_name: str) -> dict:
 
 
 @router.post("/{skill_name}/execute")
-async def execute_skill(skill_name: str, body: ExecuteSkillRequest) -> dict:
+async def execute_skill(skill_name: str, body: ExecuteSkillRequest,
+                        principal: Principal = Depends(require_principal)) -> dict:
     """Execute one skill chip directly, bypassing orchestrator routing.
 
     Still subject to the chip's own guardrails (consensus flags are
@@ -120,9 +126,10 @@ async def execute_skill(skill_name: str, body: ExecuteSkillRequest) -> dict:
     chip = get_registry().get(skill_name)
     if chip is None:
         raise HTTPException(status_code=404, detail=f"unknown skill {skill_name!r}")
-    # No route authenticates yet, so no one reaching this port gets a shell.
-    # Re-enable only behind auth (Vera's order: strip approval, consensus, auth).
+    # Callers are authenticated now (step 3), and shell stays refused all the same: re-enabling it is its own
+    # decision, after consensus and audit (Vera's order: strip approval, consensus, auth).
     refuse_shell_capable(get_registry(), [skill_name], "direct execution")
+    org_id = resolve_org(principal, body.org_id)
 
     reserved = RESERVED_PARAMETERS & set(body.parameters)
     if reserved:
@@ -135,7 +142,7 @@ async def execute_skill(skill_name: str, body: ExecuteSkillRequest) -> dict:
         parameters={k: v for k, v in body.parameters.items() if k not in RESERVED_PARAMETERS},
     )
     context = SkillContext(
-        org_id=body.org_id,
+        org_id=org_id,
         user_id=body.user_id,
         platform="api",
         metadata={"direct_execution": True},

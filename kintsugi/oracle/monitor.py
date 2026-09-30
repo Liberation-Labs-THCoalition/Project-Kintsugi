@@ -167,5 +167,12 @@ def get_oracle_monitor() -> OracleLoopMonitor:
             pass
         _monitor = OracleLoopMonitor(mode=mode)
         if endpoint:
-            _monitor.register_hook(HTTPOracleHook(endpoint))
+            try:
+                _monitor.register_hook(HTTPOracleHook(endpoint))
+            except ValueError as exc:
+                # Every agent turn would travel in plaintext to a remote host: refuse the hook, say so loudly, and
+                # keep the monitor (and the app) running without it.
+                import logging
+
+                logging.getLogger("kintsugi.oracle").error("ORACLE_ENDPOINT refused: %s", exc)
     return _monitor

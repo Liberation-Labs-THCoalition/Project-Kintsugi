@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kintsugi.api.auth import Principal, require_principal, resolve_org
 from kintsugi.config.settings import settings
 from kintsugi.db import get_session
 from kintsugi.memory.cma_stage3 import ScoredResult, estimate_complexity, retrieve
@@ -69,11 +70,12 @@ def _get_provider():
 @router.get("/search")
 async def memory_search(
     q: str = Query(..., min_length=1, description="Search query"),
-    org_id: str = Query(..., description="Organization ID"),
+    org_id: str | None = Query(None, description="Organization ID (defaults to the API key's)"),
     limit: int = Query(10, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_principal),
 ) -> dict:
-    oid = _parse_uuid(org_id)
+    oid = _parse_uuid(resolve_org(principal, org_id))
 
     # --- embed query ---
     try:
@@ -172,7 +174,7 @@ async def memory_search(
 
 class MemoryStoreRequest(BaseModel):
     content: str
-    org_id: str
+    org_id: str | None = None  # the key decides the org; a different value here is refused (step 3)
     significance: int = 5
     entity_type: str = "general"
 
@@ -181,8 +183,9 @@ class MemoryStoreRequest(BaseModel):
 async def memory_store(
     body: MemoryStoreRequest,
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_principal),
 ) -> dict:
-    oid = _parse_uuid(body.org_id)
+    oid = _parse_uuid(resolve_org(principal, body.org_id))
     memory_id = uuid.uuid4()
 
     # --- generate embedding ---

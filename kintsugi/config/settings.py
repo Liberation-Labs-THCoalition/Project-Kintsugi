@@ -62,7 +62,19 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # --- Auth ---
-    SECRET_KEY: str = "CHANGE-ME-in-production"
+    SECRET_KEY: str = "CHANGE-ME-in-production"  # not used for API auth (keys below); kept for older callers
+    # Per-org API keys: hashes only, minted by `kintsugi keys create` (step 3).
+    API_KEYS_FILE: str = "~/.kintsugi/api_keys.json"
+    # Auth off is allowed only for local development: with it set, every request not from loopback is refused.
+    KINTSUGI_AUTH_DISABLED: bool = False
+    KINTSUGI_AUTH_DISABLED_ORG: str = "default"
+    # FastAPI's /docs, /redoc and /openapi.json enumerate every route, so they are off unless asked for.
+    PUBLIC_DOCS: bool = False
+    # Oracle hook destinations, chosen by name through the API: name -> URL. The API can pick a name, never supply a
+    # URL. Each URL must be https, or http to a loopback host.
+    ORACLE_HOOK_ENDPOINTS: dict[str, str] = {}
+    # Append-only JSONL record of admin actions (Oracle mode and endpoint changes, key management).
+    AUDIT_LOG_FILE: str = "~/.kintsugi/audit.jsonl"
 
     # --- CORS ---
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
