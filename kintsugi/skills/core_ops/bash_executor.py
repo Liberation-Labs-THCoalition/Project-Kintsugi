@@ -98,7 +98,7 @@ class BashSkillChip(BaseSkillChip):
 
         argv = self._safe_argv(stripped)
         if argv is not None:
-            return BashPermission(tier="always_allow", reason="Safe read-only command", argv=argv)
+            return BashPermission(tier="always_allow", reason="Safe workspace command", argv=argv)
 
         return BashPermission(tier="ask", reason="Requires approval")
 
@@ -120,8 +120,8 @@ class BashSkillChip(BaseSkillChip):
             return None
         for arg in argv[1:]:
             if arg.startswith("-"):
-                if arg.startswith("--") or any(c in arg for c in "/~="):
-                    return None
+                if argv[0] == "date" or arg.startswith("--") or any(c in arg for c in "/~=") or ".." in arg:
+                    return None      # date takes only +FORMAT here; no option may carry a path
             elif not self._inside_workspace(arg):
                 return None
         return argv
@@ -137,8 +137,7 @@ class BashSkillChip(BaseSkillChip):
 
     def _env(self) -> dict:
         """The subprocess environment: enough to run, none of the server's secrets."""
-        return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.workspace),
-                "LANG": os.environ.get("LANG", "C.UTF-8")}
+        return {"PATH": "/usr/bin:/bin", "HOME": str(self.workspace), "LANG": "C.UTF-8"}
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         command = request.raw_input or request.parameters.get("command", "")
@@ -173,6 +172,7 @@ class BashSkillChip(BaseSkillChip):
         try:
             proc = await asyncio.create_subprocess_exec(
                 *permission.argv,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workspace),

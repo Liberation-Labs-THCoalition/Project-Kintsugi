@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 
 from kintsugi.plugins.loader import PluginLoader, PluginLoadError
 from kintsugi.plugins.registry import PluginRegistry
-from kintsugi.skills.base import SkillCapability, SkillContext, SkillRequest
+from kintsugi.api.guards import refuse_shell_capable
+from kintsugi.skills.base import SkillContext, SkillRequest
 from kintsugi.skills.registry import get_registry
 
 logger = logging.getLogger(__name__)
@@ -121,10 +122,7 @@ async def execute_skill(skill_name: str, body: ExecuteSkillRequest) -> dict:
         raise HTTPException(status_code=404, detail=f"unknown skill {skill_name!r}")
     # No route authenticates yet, so no one reaching this port gets a shell.
     # Re-enable only behind auth (Vera's order: strip approval, consensus, auth).
-    if SkillCapability.EXECUTE_SHELL in chip.capabilities:
-        raise HTTPException(status_code=403,
-                            detail=f"direct execution of {skill_name!r} is disabled: "
-                                   "shell-capable skills need authentication, which this API does not have yet")
+    refuse_shell_capable(get_registry(), [skill_name], "direct execution")
 
     reserved = RESERVED_PARAMETERS & set(body.parameters)
     if reserved:
