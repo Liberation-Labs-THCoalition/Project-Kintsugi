@@ -81,7 +81,6 @@ _route_modules = [
     # Legacy org-scoped routes (DB-backed)
     "kintsugi.api.routes.health",
     "kintsugi.api.routes.agent",
-    "kintsugi.api.routes.agent_v2",
     "kintsugi.api.routes.memory",
     "kintsugi.api.routes.config",
     # Framework layer (v1): agents, sessions, skills, oracle, events

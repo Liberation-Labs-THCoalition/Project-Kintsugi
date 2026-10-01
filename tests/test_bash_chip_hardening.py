@@ -169,18 +169,3 @@ def test_the_child_gets_a_pinned_path_and_no_stdin(chip, spawns):
     assert kw["stdin"] == asyncio.subprocess.DEVNULL
 
 
-def test_agent_v2_guards_before_it_runs_anything():
-    """agent_v2 cannot be imported yet (a missing _get_llm_client), so this
-    checks its structure: the guard call must come before every place the
-    handler runs a chip, composed or single."""
-    import ast
-    import pathlib
-    src = pathlib.Path(skills_route.__file__).with_name("agent_v2.py").read_text()
-    for fn in ast.walk(ast.parse(src)):
-        if isinstance(fn, ast.AsyncFunctionDef) and "execute_dag" in ast.unparse(fn):
-            calls = [(c.lineno, ast.unparse(c.func)) for c in ast.walk(fn) if isinstance(c, ast.Call)]
-            guard = [ln for ln, name in calls if name.endswith("refuse_shell_capable")]
-            runs = [ln for ln, name in calls if name.endswith(("execute_dag", ".handle"))]
-            assert guard and runs and min(guard) < min(runs), (guard, runs)
-            return
-    raise AssertionError("agent_v2 handler not found")
