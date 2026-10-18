@@ -149,3 +149,86 @@ async def test_within_an_org_only_the_author_or_an_admin_changes_an_offer():
                                  ctx("org_a", user, role))
     assert (await change("mallory")).success is False
     assert (await change("bob")).success is True
+
+
+# ---- the agent and session paths act as the key too (Vera's review of 6c87887, 2026-10-18: MEDIUM) ------------------
+# Once a chip grants on user_id (a need's author may change it), a body-supplied id on these paths would let one member
+# of an org pass as another. Routing doesn't reach the mutual-aid chip's status intent from free text today, so a
+# stand-in chip in its domain forwards exactly the context the agent built to the real chip's author check.
+
+def _agent_rig(monkeypatch, chip, need_id):
+    from types import SimpleNamespace
+    from kintsugi.agents.instance import AgentInstance
+    from kintsugi.agents.personality import AgentPersonality
+    from kintsugi.api.routes import fleet
+    seen = []
+
+    class Forwarder:
+        name = "mutual_aid_coordinator"
+
+        async def handle(self, request, context):
+            seen.append(context)
+            return await chip.handle(SkillRequest(intent="aid_status", raw_input="cancel",
+                                                  entities={"need_id": need_id, "new_status": "cancelled"}), context)
+
+    class Registry:
+        def get_by_domain(self, domain):
+            return [Forwarder()]
+
+    class Oracle:
+        async def review(self, turn, **kw):
+            return SimpleNamespace(blocked=False, response=turn.response,
+                                   verdict=SimpleNamespace(to_dict=lambda: {"status": "ok"}))
+
+    agent = AgentInstance(AgentPersonality(name="t"), org_id="org_a", skill_registry=Registry(),
+                          oracle_monitor=Oracle())
+
+    async def route(text, org_id, context=None):
+        return SimpleNamespace(skill_domain="mutual_aid", confidence=1.0, reasoning="test")
+    monkeypatch.setattr(agent._orchestrator, "route", route)
+
+    class Agents:
+        def get(self, agent_id):
+            return agent
+    monkeypatch.setattr(fleet, "get_agent_manager", lambda: Agents())
+    return agent, Agents(), seen
+
+
+@pytest.mark.asyncio
+async def test_a_claimed_user_on_the_agent_path_cant_pass_the_author_check(monkeypatch):
+    from kintsugi.api.auth import Principal
+    from kintsugi.api.routes import fleet
+    chip = MutualAidCoordinatorChip()
+    need_id = await post_need(chip, org="org_a", user="key:k-alice")      # alice posted it through the API, as her key
+    agent, _, seen = _agent_rig(monkeypatch, chip, need_id)
+    body = fleet.MessageRequest(message="please cancel that need", user_id="key:k-alice")
+    await fleet.message_agent(agent.id, body, principal=Principal(org_id="org_a", key_id="k-mallory", role="member"))
+    assert seen[0].user_id == "key:k-mallory" and seen[0].metadata["claimed_user"] == "key:k-alice"
+    mine = await status(chip, need_id, "org_a", "key:k-alice")
+    assert mine.success and mine.data["status"] != "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_a_session_message_acts_as_the_key_that_sends_it(monkeypatch):
+    from kintsugi.agents.sessions import SessionManager
+    from kintsugi.api.auth import Principal
+    from kintsugi.api.routes import sessions as route
+    chip = MutualAidCoordinatorChip()
+    need_id = await post_need(chip, org="org_a", user="key:k-alice")
+    agent, agents, seen = _agent_rig(monkeypatch, chip, need_id)
+    manager = SessionManager(agent_manager=agents)
+    monkeypatch.setattr(route, "get_session_manager", lambda: manager)
+    alice = Principal(org_id="org_a", key_id="k-alice", role="member")
+    mallory = Principal(org_id="org_a", key_id="k-mallory", role="member")
+    # mallory opens the session claiming to be alice: the claim is kept, and grants nothing
+    made = await route.create_session(route.CreateSessionRequest(agent_id=agent.id, user_id="key:k-alice"),
+                                      principal=mallory)
+    assert made["user_id"] == "key:k-mallory" and made["claimed_user"] == "key:k-alice"
+    await route.send_message(made["id"], route.SessionMessageRequest(message="cancel it"), principal=mallory)
+    assert seen[-1].user_id == "key:k-mallory"
+    assert (await status(chip, need_id, "org_a", "key:k-alice")).data["status"] != "cancelled"
+    # and a session one key opened, used by another key of the org, acts as the sender
+    theirs = await route.create_session(route.CreateSessionRequest(agent_id=agent.id), principal=mallory)
+    await route.send_message(theirs["id"], route.SessionMessageRequest(message="cancel it"), principal=alice)
+    assert seen[-1].user_id == "key:k-alice" and "claimed_user" not in seen[-1].metadata
+    assert (await status(chip, need_id, "org_a", "key:k-alice")).data["status"] == "cancelled"
