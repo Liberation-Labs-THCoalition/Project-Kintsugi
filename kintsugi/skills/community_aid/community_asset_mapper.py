@@ -45,6 +45,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -206,9 +207,9 @@ class CommunityAssetMapperChip(BaseSkillChip):
     ]
 
     # Simulated storage
-    _assets: dict[str, CommunityAsset] = {}
-    _skills: dict[str, SkillAsset] = {}
-    _gap_analyses: dict[str, GapAnalysis] = {}
+    _assets: dict[str, CommunityAsset] = org_scoped(dict)
+    _skills: dict[str, SkillAsset] = org_scoped(dict)
+    _gap_analyses: dict[str, GapAnalysis] = org_scoped(dict)
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.

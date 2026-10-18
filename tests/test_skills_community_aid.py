@@ -27,6 +27,7 @@ import pytest
 from datetime import datetime, timezone
 from typing import Any
 
+from kintsugi.skills.base import org_scope  # direct chip calls outside handle() name their org
 from kintsugi.skills import (
     SkillRequest,
     SkillContext,
@@ -88,9 +89,6 @@ def context_with_bdi() -> SkillContext:
 def mutual_aid_chip() -> MutualAidCoordinatorChip:
     """Create a fresh MutualAidCoordinatorChip."""
     chip = MutualAidCoordinatorChip()
-    chip._needs = {}
-    chip._offers = {}
-    chip._matches = {}
     return chip
 
 
@@ -98,11 +96,6 @@ def mutual_aid_chip() -> MutualAidCoordinatorChip:
 def resource_chip() -> ResourceRedistributionChip:
     """Create a fresh ResourceRedistributionChip."""
     chip = ResourceRedistributionChip()
-    chip._surplus = {}
-    chip._requests = {}
-    chip._schedules = {}
-    chip._partners = {}
-    chip._inventory = {}
     return chip
 
 
@@ -110,11 +103,6 @@ def resource_chip() -> ResourceRedistributionChip:
 def crisis_chip() -> CrisisResponseChip:
     """Create a fresh CrisisResponseChip."""
     chip = CrisisResponseChip()
-    chip._incidents = {}
-    chip._volunteers = {}
-    chip._resources = {}
-    chip._debriefs = {}
-    chip._alert_log = []
     return chip
 
 
@@ -122,9 +110,6 @@ def crisis_chip() -> CrisisResponseChip:
 def asset_mapper_chip() -> CommunityAssetMapperChip:
     """Create a fresh CommunityAssetMapperChip."""
     chip = CommunityAssetMapperChip()
-    chip._assets = {}
-    chip._skills = {}
-    chip._gap_analyses = {}
     return chip
 
 
@@ -132,10 +117,6 @@ def asset_mapper_chip() -> CommunityAssetMapperChip:
 def coalition_chip() -> CoalitionBuilderChip:
     """Create a fresh CoalitionBuilderChip."""
     chip = CoalitionBuilderChip()
-    chip._partners = {}
-    chip._campaigns = {}
-    chip._meetings = {}
-    chip._outreach = {}
     return chip
 
 
@@ -374,14 +355,15 @@ class TestResourceRedistributionChip:
     ):
         """Test inventory check returns data."""
         # First add some inventory
-        await resource_chip.report_surplus(
-            partner_id="test-partner",
-            resource_type="shelf_stable",
-            description="Canned goods",
-            quantity="100",
-            unit="cans",
-            pickup_location="Food Bank",
-        )
+        with org_scope(context.org_id):    # a direct call outside handle() names its org
+            await resource_chip.report_surplus(
+                partner_id="test-partner",
+                resource_type="shelf_stable",
+                description="Canned goods",
+                quantity="100",
+                unit="cans",
+                pickup_location="Food Bank",
+            )
 
         request = SkillRequest(intent="inventory_check", entities={})
         response = await resource_chip.handle(request, context)
@@ -412,14 +394,15 @@ class TestResourceRedistributionChip:
     ):
         """Test scheduling pickups."""
         # First create surplus
-        surplus = await resource_chip.report_surplus(
-            partner_id="test",
-            resource_type="clothing",
-            description="Winter coats",
-            quantity="30",
-            unit="items",
-            pickup_location="Donation Center",
-        )
+        with org_scope(context.org_id):    # a direct call outside handle() names its org
+            surplus = await resource_chip.report_surplus(
+                partner_id="test",
+                resource_type="clothing",
+                description="Winter coats",
+                quantity="30",
+                unit="items",
+                pickup_location="Donation Center",
+            )
 
         request = SkillRequest(
             intent="pickup_schedule",
@@ -686,15 +669,16 @@ class TestCommunityAssetMapperChip:
     ):
         """Test asset search."""
         # Add an asset first
-        await asset_mapper_chip.add_asset(
-            asset_type="space",
-            name="Searchable Space",
-            description="Test space",
-            address="789 Test St",
-            categories=["meeting_space"],
-            owner_id="owner-1",
-            owner_name="Test Owner",
-        )
+        with org_scope(context.org_id):    # a direct call outside handle() names its org
+            await asset_mapper_chip.add_asset(
+                asset_type="space",
+                name="Searchable Space",
+                description="Test space",
+                address="789 Test St",
+                categories=["meeting_space"],
+                owner_id="owner-1",
+                owner_name="Test Owner",
+            )
 
         request = SkillRequest(
             intent="asset_search",

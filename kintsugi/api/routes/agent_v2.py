@@ -70,6 +70,17 @@ def _load_bdi_context() -> tuple[list, list]:
         return [], []
 
 
+def _trusted_metadata(body_context, principal: Principal) -> dict:
+    """The caller's context dict, with what the server decides written over it: the acting user is the key (chips
+    match records to user_id), and the role comes from the key, never the body, or a caller could send "role": "admin"
+    (Vera's re-check, 2026-10-18). Whatever user_id the body claimed is kept as claimed_user, for the log."""
+    meta = dict(body_context or {})
+    claimed = meta.pop("user_id", None)
+    meta["role"] = principal.role
+    meta["claimed_user"] = claimed
+    return meta
+
+
 @router.post("/message", response_model=AgentResponse)
 async def agent_message_v2(req: AgentRequest, principal: Principal = Depends(require_principal)) -> AgentResponse:
     """Enhanced message handling with tree discovery and DAG composition."""
@@ -107,9 +118,9 @@ async def agent_message_v2(req: AgentRequest, principal: Principal = Depends(req
     if decision.is_composed and decision.dag:
         context = SkillContext(
             org_id=req.org_id,
-            user_id=req.context.get("user_id", "unknown") if req.context else "unknown",
+            user_id=f"key:{principal.key_id}",
             platform=req.context.get("platform", "api") if req.context else "api",
-            metadata=req.context or {},
+            metadata=_trusted_metadata(req.context, principal),
         )
 
         result = await orch.execute_dag(decision.dag, context)
@@ -144,9 +155,9 @@ async def agent_message_v2(req: AgentRequest, principal: Principal = Depends(req
         if chip:
             context = SkillContext(
                 org_id=req.org_id,
-                user_id=req.context.get("user_id", "unknown") if req.context else "unknown",
+                user_id=f"key:{principal.key_id}",
                 platform=req.context.get("platform", "api") if req.context else "api",
-                metadata=req.context or {},
+                metadata=_trusted_metadata(req.context, principal),
             )
             request = SkillRequest(
                 intent=decision.skill_domain,

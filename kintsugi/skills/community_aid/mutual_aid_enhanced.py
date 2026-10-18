@@ -37,6 +37,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from kintsugi.skills.base import org_scoped  # engines kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -124,21 +125,36 @@ class MutualAidEnhancedChip(BaseSkillChip):
 
     def __init__(self):
         super().__init__()
-        if CORE_AVAILABLE:
-            self._match_engine = MatchEngine()
-            self._dispatcher = Dispatcher(
-                notify_fn=self._kintsugi_notify,
-                match_engine=self._match_engine,
-            )
-            self._followup = FollowupWorker()
-            self._resources = ResourceGraph()
-            logger.info("Enhanced Mutual Aid: standalone core loaded")
-        else:
-            self._match_engine = None
-            self._dispatcher = None
-            self._followup = None
-            self._resources = None
-            logger.info("Enhanced Mutual Aid: using built-in handlers only")
+        logger.info("Enhanced Mutual Aid: %s", "standalone core loaded" if CORE_AVAILABLE
+                    else "using built-in handlers only")
+
+    def _build_core(self):
+        """One set of engines per organisation: they hold people's requests and resources, and one shared set let one
+        org's key reach another's (Vera's re-check, 2026-10-18)."""
+        if not CORE_AVAILABLE:
+            return None
+        match_engine = MatchEngine()
+        return {"match_engine": match_engine,
+                "dispatcher": Dispatcher(notify_fn=self._kintsugi_notify, match_engine=match_engine),
+                "followup": FollowupWorker(), "resources": ResourceGraph()}
+
+    _core = org_scoped(_build_core, owner=True)
+
+    @property
+    def _match_engine(self):
+        return self._core["match_engine"] if self._core else None
+
+    @property
+    def _dispatcher(self):
+        return self._core["dispatcher"] if self._core else None
+
+    @property
+    def _followup(self):
+        return self._core["followup"] if self._core else None
+
+    @property
+    def _resources(self):
+        return self._core["resources"] if self._core else None
 
     async def handle(
         self, request: SkillRequest, context: SkillContext

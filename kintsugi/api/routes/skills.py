@@ -44,7 +44,7 @@ class ExecuteSkillRequest(BaseModel):
     intent: str = ""
     raw_input: str = Field(min_length=1)
     org_id: str | None = None  # the key decides the org; a different value here is refused
-    user_id: str = "api"       # audit metadata; grants nothing
+    user_id: str = "api"       # recorded as claimed_user only: the acting user is the authenticated key, never this
     entities: dict[str, Any] = {}
     parameters: dict[str, Any] = {}
 
@@ -141,11 +141,13 @@ async def execute_skill(skill_name: str, body: ExecuteSkillRequest,
         raw_input=body.raw_input,
         parameters={k: v for k, v in body.parameters.items() if k not in RESERVED_PARAMETERS},
     )
+    # The acting user is the authenticated key, never the body: chips match records to user_id, so a body-supplied id let
+    # one caller act as another (Vera's re-check, 2026-10-18). The body's value is kept only as a claim, for the log.
     context = SkillContext(
         org_id=org_id,
-        user_id=body.user_id,
+        user_id=f"key:{principal.key_id}",
         platform="api",
-        metadata={"direct_execution": True},
+        metadata={"direct_execution": True, "role": principal.role, "claimed_user": body.user_id},
     )
     try:
         response = await chip.handle(request, context)

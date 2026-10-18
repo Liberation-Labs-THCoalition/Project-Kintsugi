@@ -44,6 +44,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -198,11 +199,11 @@ class ResourceRedistributionChip(BaseSkillChip):
     ]
 
     # Simulated storage
-    _surplus: dict[str, SurplusResource] = {}
-    _requests: dict[str, ResourceRequest] = {}
-    _schedules: dict[str, PickupSchedule] = {}
-    _partners: dict[str, Partner] = {}
-    _inventory: dict[str, dict[str, int]] = {}  # location -> {type: quantity}
+    _surplus: dict[str, SurplusResource] = org_scoped(dict)
+    _requests: dict[str, ResourceRequest] = org_scoped(dict)
+    _schedules: dict[str, PickupSchedule] = org_scoped(dict)
+    _partners: dict[str, Partner] = org_scoped(dict)
+    _inventory: dict[str, dict[str, int]] = org_scoped(dict)  # location -> {type: quantity}
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
