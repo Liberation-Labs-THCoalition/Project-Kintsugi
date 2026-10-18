@@ -43,6 +43,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -225,10 +226,10 @@ class CoalitionBuilderChip(BaseSkillChip):
     ]
 
     # Simulated storage
-    _partners: dict[str, PartnerOrganization] = {}
-    _campaigns: dict[str, CoalitionCampaign] = {}
-    _meetings: dict[str, CoalitionMeeting] = {}
-    _outreach: dict[str, OutreachRecord] = {}
+    _partners: dict[str, PartnerOrganization] = org_scoped(dict)
+    _campaigns: dict[str, CoalitionCampaign] = org_scoped(dict)
+    _meetings: dict[str, CoalitionMeeting] = org_scoped(dict)
+    _outreach: dict[str, OutreachRecord] = org_scoped(dict)
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.

@@ -18,7 +18,7 @@ class CreateSessionRequest(BaseModel):
     agent_id: str | None = None  # attach to an existing agent...
     personality: str = "default"  # ...or spawn a fresh one with this personality
     org_id: str | None = None  # the key decides the org; a different value here is refused
-    user_id: str = "api"  # audit metadata; grants nothing
+    user_id: str = "api"  # recorded as claimed_user only: each message acts as the key that sends it
 
 
 class SessionMessageRequest(BaseModel):
@@ -55,7 +55,8 @@ async def create_session(body: CreateSessionRequest, principal: Principal = Depe
             agent_id=body.agent_id,
             personality=body.personality,
             org_id=org_id,
-            user_id=body.user_id,
+            user_id=f"key:{principal.key_id}",
+            claimed_user=body.user_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -75,7 +76,10 @@ async def send_message(session_id: str, body: SessionMessageRequest,
     manager = get_session_manager()
     own_session(session_id, principal)
     try:
-        result = await manager.send_message(session_id, body.message, context=body.context)
+        # Each message acts as the key that sends it, not the session's creator: two keys of one org can share a
+        # session, and a chip grants on user_id (Vera's review of 6c87887, 2026-10-18).
+        result = await manager.send_message(session_id, body.message, context=body.context,
+                                            user_id=f"key:{principal.key_id}")
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:

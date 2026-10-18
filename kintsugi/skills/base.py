@@ -12,6 +12,9 @@ Key concepts:
 - BaseSkillChip: Abstract base class all skill chips inherit from
 """
 
+import contextlib
+import contextvars
+import functools
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -363,6 +366,65 @@ class ProgramFunction:
         return self.intervention.action(request, context, state)
 
 
+# ---- data held inside chips, one copy per organisation (Vera's re-check, 2026-10-18) ----------------------------------
+# A chip instance serves every org in the process. Its records (needs, offers, incidents, partners...) used to live in
+# class-level dicts: one org's key could read and cancel another org's records. Now a chip's records are kept per org,
+# the org comes from the request's context (which the API takes from the authenticated key), and reading a store with
+# no org in scope raises. There is no "all orgs" view.
+_CURRENT_ORG: "contextvars.ContextVar[Optional[str]]" = contextvars.ContextVar("kintsugi_chip_org", default=None)
+
+
+class ChipStorageError(RuntimeError):
+    """Chip storage was touched with no organisation in scope."""
+
+
+@contextlib.contextmanager
+def org_scope(org_id: Optional[str]):
+    """Make `org_id` the organisation whose chip records are read and written inside the block."""
+    if not isinstance(org_id, str) or not org_id:
+        raise ChipStorageError("a chip call needs the organisation it acts for")
+    token = _CURRENT_ORG.set(org_id)
+    try:
+        yield org_id
+    finally:
+        _CURRENT_ORG.reset(token)
+
+
+def current_org() -> Optional[str]:
+    return _CURRENT_ORG.get()
+
+
+class org_scoped:
+    """A chip attribute holding records, kept separately for each organisation. `factory()` makes an org's empty store
+    on first use; with owner=True it is called as `factory(chip)`. Read or assigned with no org in scope, it raises."""
+
+    def __init__(self, factory: Callable[..., Any] = dict, owner: bool = False) -> None:
+        self._factory = factory
+        self._owner = owner
+        self._name = "store"
+
+    def __set_name__(self, cls, name: str) -> None:
+        self._name = name
+
+    def _key(self, obj) -> tuple:
+        org = _CURRENT_ORG.get()
+        if not org:
+            raise ChipStorageError(f"{type(obj).__name__}.{self._name} touched with no organisation in scope")
+        return (self._name, org)
+
+    def __get__(self, obj, cls=None):
+        if obj is None:
+            return self
+        stores = obj.__dict__.setdefault("_org_stores", {})
+        key = self._key(obj)
+        if key not in stores:
+            stores[key] = self._factory(obj) if self._owner else self._factory()
+        return stores[key]
+
+    def __set__(self, obj, value) -> None:
+        obj.__dict__.setdefault("_org_stores", {})[self._key(obj)] = value
+
+
 class BaseSkillChip(ABC):
     """Abstract base class for all skill chips.
 
@@ -429,6 +491,22 @@ class BaseSkillChip(ABC):
 
     # Program Functions — proactive interventions (v2)
     program_functions: list[ProgramFunction] = []
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Every chip's handle() runs in its context's organisation, so its records are that org's alone, whichever
+        path called it: the API, an agent, a session or the orchestrator."""
+        super().__init_subclass__(**kwargs)
+        handle = cls.__dict__.get("handle")
+        if handle is None or getattr(handle, "_org_scoped", False) or getattr(handle, "__isabstractmethod__", False):
+            return
+
+        @functools.wraps(handle)
+        async def handle_in_org(self, request, context, *args, **kw):
+            with org_scope(getattr(context, "org_id", None)):
+                return await handle(self, request, context, *args, **kw)
+
+        handle_in_org._org_scoped = True
+        cls.handle = handle_in_org
 
     def __init__(self) -> None:
         """Initialize the skill chip.

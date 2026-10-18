@@ -43,6 +43,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -134,6 +135,14 @@ class AidMatch:
     notes: str = ""
 
 
+def _may_change(owner_id: str, context: SkillContext, hashed: bool = False) -> bool:
+    """The record's own author, or an admin of the org (the role comes from the authenticated key, never the body).
+    A need stores its requester as a truncated SHA-256 (post_need, for privacy), so hashed=True compares that form."""
+    from hashlib import sha256
+    me = sha256(context.user_id.encode()).hexdigest()[:16] if hashed else context.user_id
+    return (bool(owner_id) and me == owner_id) or (context.metadata or {}).get("role") == "admin"
+
+
 class MutualAidCoordinatorChip(BaseSkillChip):
     """Coordinate mutual aid requests and offers with privacy preservation.
 
@@ -176,9 +185,9 @@ class MutualAidCoordinatorChip(BaseSkillChip):
     ]
 
     # Simulated in-memory storage (would be real DB in production)
-    _needs: dict[str, AidNeed] = {}
-    _offers: dict[str, AidOffer] = {}
-    _matches: dict[str, AidMatch] = {}
+    _needs: dict[str, AidNeed] = org_scoped(dict)
+    _offers: dict[str, AidOffer] = org_scoped(dict)
+    _matches: dict[str, AidMatch] = org_scoped(dict)
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -675,12 +684,16 @@ class MutualAidCoordinatorChip(BaseSkillChip):
     async def _update_need_status(
         self, need_id: str, new_status: str | None, context: SkillContext
     ) -> SkillResponse:
-        """Update need status with authorization check."""
+        """Update need status. Only the person who posted the need, or an org admin, may change it (Vera's re-check,
+        2026-10-18: the docstring promised a check that didn't exist)."""
         need = self._needs.get(need_id)
         if not need:
             return SkillResponse(content=f"Need {need_id} not found.", success=False)
 
         if new_status:
+            if not _may_change(need.requester_id, context, hashed=True):
+                return SkillResponse(content="Only the person who posted this need, or an admin, can change it.",
+                                     success=False)
             need.status = AidStatus(new_status)
             return SkillResponse(
                 content=f"Need status updated to {new_status}.",
@@ -697,12 +710,15 @@ class MutualAidCoordinatorChip(BaseSkillChip):
     async def _update_offer_status(
         self, offer_id: str, new_status: str | None, context: SkillContext
     ) -> SkillResponse:
-        """Update offer status."""
+        """Update offer status. Only the person who made the offer, or an org admin, may change it."""
         offer = self._offers.get(offer_id)
         if not offer:
             return SkillResponse(content=f"Offer {offer_id} not found.", success=False)
 
         if new_status:
+            if not _may_change(offer.offerer_id, context):
+                return SkillResponse(content="Only the person who made this offer, or an admin, can change it.",
+                                     success=False)
             offer.status = AidStatus(new_status)
             return SkillResponse(
                 content=f"Offer status updated to {new_status}.",

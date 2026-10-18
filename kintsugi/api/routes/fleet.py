@@ -22,7 +22,7 @@ class SpawnRequest(BaseModel):
 
 class MessageRequest(BaseModel):
     message: str = Field(min_length=1)
-    user_id: str = "api"
+    user_id: str = "api"  # recorded as claimed_user only: the acting user is the authenticated key, never this
     context: dict[str, Any] = {}
 
 
@@ -85,8 +85,10 @@ async def message_agent(agent_id: str, body: MessageRequest,
     """One-shot message to an agent outside any session."""
     agent = own_agent(agent_id, principal)
     try:
+        # The acting user is the key: since chips grant on user_id (a need's author can change it), a body value
+        # would let one member of an org act as another (Vera's review of 6c87887, 2026-10-18).
         result = await agent.handle_message(
-            body.message, user_id=body.user_id, context=body.context
+            body.message, user_id=f"key:{principal.key_id}", context=body.context, claimed_user=body.user_id
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

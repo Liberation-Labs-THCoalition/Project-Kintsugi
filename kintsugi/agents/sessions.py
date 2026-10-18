@@ -23,7 +23,8 @@ class Session:
     agent_id: str
     id: str = field(default_factory=lambda: f"sess-{uuid.uuid4().hex[:10]}")
     org_id: str = "default"
-    user_id: str = "api"
+    user_id: str = "api"                 # who created it: an authenticated key on the API
+    claimed_user: str | None = None      # what the creator said its user was; for the log, grants nothing
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     closed: bool = False
     history: deque = field(default_factory=lambda: deque(maxlen=200))
@@ -54,6 +55,7 @@ class Session:
             "agent_id": self.agent_id,
             "org_id": self.org_id,
             "user_id": self.user_id,
+            "claimed_user": self.claimed_user,
             "created_at": self.created_at.isoformat(),
             "closed": self.closed,
             "turns": len(self.history) // 2,
@@ -83,6 +85,7 @@ class SessionManager:
         personality: str = "default",
         org_id: str = "default",
         user_id: str = "api",
+        claimed_user: str | None = None,
     ) -> Session:
         """Create a session, spawning a fresh agent if none was given."""
         if len([s for s in self._sessions.values() if not s.closed]) >= self.max_sessions:
@@ -94,7 +97,7 @@ class SessionManager:
         else:
             self._agents.get(agent_id)  # validate
 
-        session = Session(agent_id=agent_id, org_id=org_id, user_id=user_id)
+        session = Session(agent_id=agent_id, org_id=org_id, user_id=user_id, claimed_user=claimed_user)
         self._sessions[session.id] = session
         self._events.publish(
             "session.created", {"user_id": user_id}, agent_id=agent_id, session_id=session.id
@@ -122,8 +125,10 @@ class SessionManager:
         return session
 
     async def send_message(
-        self, session_id: str, message: str, context: dict[str, Any] | None = None
+        self, session_id: str, message: str, context: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> TurnResult:
+        """*user_id* is who sends this message (the API passes the sending key); without one, the session's creator."""
         session = self.get(session_id)
         if session.closed:
             raise RuntimeError(f"session {session_id} is closed")
@@ -131,8 +136,9 @@ class SessionManager:
         result = await agent.handle_message(
             message,
             session_id=session.id,
-            user_id=session.user_id,
+            user_id=user_id if user_id is not None else session.user_id,
             context=context,
+            claimed_user=session.claimed_user if user_id in (None, session.user_id) else None,   # the creator's claim
         )
         session.record(message, result)
         return result

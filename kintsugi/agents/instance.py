@@ -126,7 +126,10 @@ class AgentInstance:
         session_id: str | None = None,
         user_id: str = "api",
         context: dict[str, Any] | None = None,
+        claimed_user: str | None = None,
     ) -> TurnResult:
+        """*user_id* is who acts, and a chip may grant on it (a need's author can change it), so a route passes the
+        authenticated key, never a body value. *claimed_user* is what the caller said, kept only for the log."""
         if self.state == AgentState.STOPPED:
             raise RuntimeError(f"agent {self.id} is stopped")
 
@@ -141,7 +144,7 @@ class AgentInstance:
         )
 
         try:
-            return await self._process(message, session_id, user_id, context or {})
+            return await self._process(message, session_id, user_id, context or {}, claimed_user)
         finally:
             if self.state != AgentState.STOPPED:
                 self.state = AgentState.IDLE
@@ -152,6 +155,7 @@ class AgentInstance:
         session_id: str | None,
         user_id: str,
         context: dict[str, Any],
+        claimed_user: str | None = None,
     ) -> TurnResult:
         # 1. Security scan (prompt-injection / dangerous-command patterns)
         sec = self._security.check_text(message)
@@ -186,7 +190,7 @@ class AgentInstance:
 
         # 4. Execute the best permitted skill in that domain
         response_text, skill_used = await self._execute_skill(
-            decision.skill_domain, message, session_id, user_id, context
+            decision.skill_domain, message, session_id, user_id, context, claimed_user
         )
 
         # 5. Oracle Loop review — every response passes through before delivery
@@ -236,6 +240,7 @@ class AgentInstance:
         session_id: str | None,
         user_id: str,
         context: dict[str, Any],
+        claimed_user: str | None = None,
     ) -> tuple[str, str | None]:
         """Find a permitted chip for *domain* and run it."""
         chip = None
@@ -274,7 +279,8 @@ class AgentInstance:
             user_id=user_id,
             session_id=session_id,
             platform="api",
-            metadata={"agent_id": self.id, "personality": self.personality.name},
+            metadata={"agent_id": self.id, "personality": self.personality.name,
+                      **({"claimed_user": claimed_user} if claimed_user is not None else {})},
         )
         try:
             response = await chip.handle(request, skill_context)
