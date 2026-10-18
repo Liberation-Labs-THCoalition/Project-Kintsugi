@@ -45,6 +45,8 @@ class Session:
                 "skill_used": result.skill_used,
                 "oracle_status": result.oracle.get("status"),
                 "blocked": result.blocked,
+                "requires_consensus": result.requires_consensus,
+                "consensus_action": result.consensus_action,
                 "timestamp": result.timestamp.isoformat(),
             }
         )

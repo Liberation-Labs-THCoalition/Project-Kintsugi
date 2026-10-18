@@ -6,7 +6,7 @@ Keyed on capability, not name: a renamed shell chip is still a shell
 """
 from fastapi import HTTPException
 
-from kintsugi.skills.base import SkillCapability
+from kintsugi.skills.base import is_shell_capable
 
 
 def refuse_shell_capable(registry, skill_names, route: str) -> None:
@@ -14,7 +14,7 @@ def refuse_shell_capable(registry, skill_names, route: str) -> None:
     shell = []
     for name in skill_names or []:
         chip = registry.get(name)
-        if chip is not None and SkillCapability.EXECUTE_SHELL in chip.capabilities:
+        if chip is not None and is_shell_capable(chip):
             shell.append(name)
     if shell:
         raise HTTPException(

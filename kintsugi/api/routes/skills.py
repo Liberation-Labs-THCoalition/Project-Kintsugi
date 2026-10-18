@@ -12,7 +12,7 @@ from kintsugi.api.auth import Principal, audit, require_admin, require_principal
 from kintsugi.plugins.loader import PluginLoader, PluginLoadError
 from kintsugi.plugins.registry import PluginRegistry
 from kintsugi.api.guards import refuse_shell_capable
-from kintsugi.skills.base import SkillContext, SkillRequest
+from kintsugi.skills.base import RESERVED_PARAMETERS, SkillContext, SkillRequest
 from kintsugi.skills.registry import get_registry
 
 logger = logging.getLogger(__name__)
@@ -34,10 +34,6 @@ def _get_plugin_machinery() -> tuple[PluginLoader, PluginRegistry]:
         _plugin_registry = PluginRegistry()
     return _plugin_loader, _plugin_registry
 
-
-# Parameters only the server may set. A caller-supplied "approved" used to
-# authorize BashSkillChip's approval tier (Vera, 2026-09-24).
-RESERVED_PARAMETERS = frozenset({"approved"})
 
 
 class ExecuteSkillRequest(BaseModel):
