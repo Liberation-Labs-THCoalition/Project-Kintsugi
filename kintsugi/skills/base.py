@@ -464,7 +464,9 @@ class org_scoped:
 def _mark_sample(chip, intent, response):
     """A sample-data chip's response says so before anything else, and carries simulated=True in data and metadata,
     so neither a person nor a program mistakes placeholders for the organization's records."""
-    if not isinstance(response, SkillResponse) or not type(chip).simulated or intent in type(chip).real_intents:
+    # An instance can say more than its class: a chip configured with the organization's own data (member tiers, say)
+    # is no longer on sample data, though the class default is.
+    if not isinstance(response, SkillResponse) or not chip.simulated or intent in chip.real_intents:
         return response
     if (response.metadata or {}).get("simulated"):
         return response  # already marked (a chip whose handle() calls super().handle() is wrapped twice)

@@ -61,7 +61,6 @@ PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
     "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
-    "member_services.py": "renewals 'processed', receipts and emails 'sent'; invented members and figures",
     "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
     "board_liaison.py": "invented minutes, motions, votes, compliance status and board report",
     "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
@@ -802,3 +801,38 @@ async def test_the_roster_is_asked_for_the_requests_own_org():
     await VolunteerCoordinatorChip(roster=roster).handle(SkillRequest(intent="volunteer_notify", raw_input="n",
         entities={"volunteer_ids": ["v1"], "message": "m"}), _ctx())
     assert asked and set(asked) == {"org_h"}
+
+
+# ---- member services: the repairs --------------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_no_member_payment_message_or_report_is_invented():
+    from kintsugi.skills.programs_people.member_services import MemberServicesChip
+    chip = MemberServicesChip()
+    look = await chip.handle(SkillRequest(intent="member_lookup", raw_input="l", entities={"member_id": "m-9"}), _ctx())
+    assert look.data["member"] is None and "Jennifer" not in look.content
+    one = await chip.handle(SkillRequest(intent="member_communicate", raw_input="c", entities={
+        "member_id": "m-9", "subject": "Hi"}), _ctx())
+    assert one.data["communication"]["sent"] is False and _claims_in(one.content) == [] and "Sent " not in one.content
+    rep = await chip.handle(SkillRequest(intent="membership_report", raw_input="r"), _ctx())
+    assert rep.data["membership_report"] is None and "277" not in rep.content
+
+
+@pytest.mark.asyncio
+async def test_a_renewal_takes_no_payment_and_the_hold_says_so():
+    from kintsugi.skills.programs_people.member_services import MemberServicesChip
+    held = await MemberServicesChip().handle(SkillRequest(intent="membership_renew", raw_input="r", entities={
+        "member_id": "m-1", "tier": "gold"}), _ctx())
+    assert held.metadata.get("held") and "nothing is charged" in held.content
+
+
+@pytest.mark.asyncio
+async def test_the_example_tiers_stay_in_sample_mode_until_the_organization_gives_its_own():
+    from kintsugi.skills.programs_people.member_services import MemberServicesChip, MembershipTier
+    example = await MemberServicesChip().handle(SkillRequest(intent="benefits_info", raw_input="b"), _ctx())
+    assert example.content.startswith(SAMPLE_NOTICE) and "Most popular" not in example.content
+    own = MemberServicesChip(tiers={"member": MembershipTier(tier_id="t1", name="Member", annual_fee=20.0,
+                                                             benefits=["A vote"], description="d")})
+    r = await own.handle(SkillRequest(intent="benefits_info", raw_input="b", entities={"tier": "member"}), _ctx())
+    assert not r.content.startswith(SAMPLE_NOTICE) and "$20.00" in r.content
+    assert not MemberServicesChip.simulated is False                   # the class default is still sample

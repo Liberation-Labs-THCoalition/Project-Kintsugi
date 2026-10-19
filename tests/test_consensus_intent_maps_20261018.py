@@ -116,7 +116,7 @@ NO_STEP = {
     ("BoardLiaisonChip", "resolution_track"), ("KnowYourRightsChip", "legal_clinic"),
     ("MutualAidCoordinatorChip", "match_request"), ("ImpactAuditorChip", "impact_report"),
     ("SolidarityEconomyChip", "time_bank"), ("FinanceAssistantChip", "invoice_create"),
-    ("MemberServicesChip", "member_communicate"),
+    ("MemberServicesChip", "member_communicate"), ("MemberServicesChip", "membership_renew"),
 }
 
 

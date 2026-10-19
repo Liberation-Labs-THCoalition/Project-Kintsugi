@@ -259,4 +259,5 @@ async def test_a_renewal_that_charges_for_a_tier_is_held_and_needs_two_people():
     assert gate.approve(r.data["consent_id"], "key:k-a1", org_id="org_a").status == ConsentStatus.PENDING
     assert gate.approve(r.data["consent_id"], "key:k-a2", org_id="org_a").status == ConsentStatus.APPROVED
     result = await consumer.execute_approved(r.data["consent_id"], "org_a", Registry(chip))
-    assert result["success"] and "processed successfully" in result["content"]
+    # No payment processor is connected, so approval charges nothing: the chip has no step, and says so (10-19)
+    assert not result["success"] and "no step that carries out change_membership_tier" in result["content"]

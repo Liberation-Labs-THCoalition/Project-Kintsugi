@@ -621,9 +621,8 @@ class TestMemberServicesChip:
             entities={"member_id": "mem_001"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "member" in response.data
-        assert "membership_tier" in response.data["member"]
+        # No member database is connected: no member is invented (10-19: every lookup returned "Jennifer Wilson")
+        assert response.success and response.data["member"] is None and "isn't connected" in response.content
 
     @pytest.mark.asyncio
     async def test_handle_membership_renew(self, chip, context):
@@ -634,9 +633,9 @@ class TestMemberServicesChip:
         )
         response = await chip.handle(request, context)
         result = await _approved(chip, response, context)       # a renewal charges for a tier: held, two approvers
-        assert result["success"]
-        assert "renewal" in result["data"]
-        assert result["data"]["renewal"]["tier"] == "gold"
+        # No payment processor is connected: approval charges nothing, and the chip says it has no step (10-19)
+        assert not result["success"] and "no step that carries out change_membership_tier" in result["content"]
+        assert result["data"]["renewal"]["charged"] is False and result["data"]["renewal"]["processed"] is False
 
     @pytest.mark.asyncio
     async def test_handle_benefits_info(self, chip, context):
@@ -668,9 +667,8 @@ class TestMemberServicesChip:
             entities={"period": "monthly", "include_trends": True},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "membership_report" in response.data
-        assert "trends" in response.data["membership_report"]
+        # No member database: no counts, revenue or trends are invented (10-19)
+        assert response.success and response.data["membership_report"] is None
 
     @pytest.mark.asyncio
     async def test_membership_report_includes_recommendations(self, chip, context):
@@ -680,9 +678,7 @@ class TestMemberServicesChip:
             entities={"period": "monthly"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "recommendations" in response.data["membership_report"]
-        assert len(response.data["membership_report"]["recommendations"]) > 0
+        assert response.success and "isn't connected" in response.content and "$" not in response.content
 
 
 # ==============================================================================
@@ -886,13 +882,7 @@ class TestResponseStructure:
         )
         response = await chip.handle(request, context)
 
-        member = response.data["member"]
-        assert "member_id" in member
-        assert "name" in member
-        assert "membership_tier" in member
-        assert "status" in member
-        assert "tier_benefits" in member
-        assert "engagement" in member
+        assert response.data["member"] is None and response.data["connected"] is False
 
 
 # ==============================================================================
