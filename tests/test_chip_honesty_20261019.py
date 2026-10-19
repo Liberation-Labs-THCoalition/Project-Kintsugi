@@ -59,7 +59,6 @@ def _walk_strings(path: Path):
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "solidarity_economy.py": "invented coops, CDFI terms and a time-bank balance",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
     "volunteer_coordinator.py": "'Sent N notifications' when nothing is sent; invented roster",
     "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
@@ -108,6 +107,7 @@ URL = re.compile(r"https?://|\bwww\.|\b[\w-]+\.(?:org|com|gov|net|edu)(?:/|\b)|[
 # Each checked by hand. A deployment's own links belong in its configuration, not in chip code.
 ALLOWED_URLS: set[str] = {
     "https://www.aclu.org",  # the ACLU's own site (know_your_rights; checked 10-19)
+    "neweconomy.net",        # the New Economy Coalition's site (solidarity_economy; checked 10-19)
 }
 
 
@@ -241,6 +241,7 @@ REAL_CHIPS = {
     "MutualAidEnhancedChip": "never refuses a person for naming a fear; says nothing was posted without its core (10-19)",
     "MutualAidCoordinatorChip": "real records; says nobody is notified and no contact details are shared (10-19)",
     "ResourceRedistributionChip": "real records; says pickups and partners are recorded, nobody told (10-19)",
+    "SolidarityEconomyChip": "formation guidance and real networks; no invented co-op, balance, loan or cost (10-19)",
 }
 
 
@@ -613,3 +614,34 @@ async def test_a_recorded_pickup_says_nobody_has_been_told():
     p = await chip.handle(SkillRequest(intent="pickup_schedule", raw_input="p", entities={
         "surplus_id": s.data["surplus_id"], "delivery_location": "Eureka"}), _ctx())
     assert p.success and "Nobody has been told" in p.content and _claims_in(p.content) == []
+
+
+# ---- solidarity economy: the repairs -----------------------------------------------------------------------------------
+
+async def _se(intent, **entities):
+    from kintsugi.skills.community_aid.solidarity_economy import SolidarityEconomyChip
+    return await SolidarityEconomyChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_no_coop_balance_member_or_loan_is_made_up():
+    coops = await _se("coop_search", location="Oakland")
+    assert coops.data["coops"] == [] and "Green City" not in coops.content
+    balance = await _se("time_bank", action="balance")
+    assert "12.5" not in balance.content and balance.data["connected"] is False
+    browse = await _se("time_bank", action="browse")
+    assert "John D." not in browse.content
+    loans = await _se("cdfi_loan", amount=50000)
+    assert loans.data["loans"] == [] and "Cooperative Fund of the Northeast" not in loans.content and "%" not in loans.content
+
+
+@pytest.mark.asyncio
+async def test_a_small_exchange_records_nothing_and_says_so():
+    r = await _se("time_bank", action="exchange", hours=2, service="tutoring", recipient="m-2")
+    assert r.data["recorded"] is False and "no credits have moved" in r.content and "Pending Verification" not in r.content
+
+
+@pytest.mark.asyncio
+async def test_formation_guidance_names_costs_without_inventing_amounts():
+    r = await _se("coop_start", coop_type="worker", members=4)
+    assert "vary a lot by state" in r.content and "$" not in r.content

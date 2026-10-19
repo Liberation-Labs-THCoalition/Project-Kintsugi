@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -175,6 +176,9 @@ class SolidarityEconomyChip(BaseSkillChip):
         ),
     }
     required_spans = ["coop_registry", "time_bank_ledger", "cdfi_network", "worker_owner_tools"]
+    # Honest without its spans (kintsugi/skills/honesty.py): general formation guidance and real national networks,
+    # but no invented co-op, balance, member, loan term or cost. A time-bank exchange records nothing, and says so.
+    simulated = False
 
     # Time bank exchange rates (all services valued equally at 1 hour = 1 credit)
     TIME_BANK_RATE = 1.0
@@ -246,9 +250,9 @@ class SolidarityEconomyChip(BaseSkillChip):
         for doc in process["documents"]:
             content += f"- {doc}\n"
 
-        content += "\n**Estimated Costs:**\n"
-        for cost_item, amount in process["estimated_costs"].items():
-            content += f"- {cost_item}: ${amount:,}\n"
+        content += "\n**Costs to budget for** (they vary a lot by state and business):\n"
+        for cost_item in process["costs_to_budget"]:
+            content += f"- {cost_item}\n"
 
         content += "\n**Support Resources:**\n"
         for resource in process["resources"]:
@@ -261,9 +265,7 @@ class SolidarityEconomyChip(BaseSkillChip):
             requires_consensus=True,
             consensus_action="approve_coop_formation",
             suggestions=[
-                "Get governance templates",
-                "Find a coop developer",
-                "Connect with similar coops",
+                "List the governance documents to prepare",
             ],
         )
 
@@ -324,12 +326,12 @@ class SolidarityEconomyChip(BaseSkillChip):
                 "Business Plan",
                 "Financial Projections",
             ],
-            "estimated_costs": {
-                "Incorporation fees": 500,
-                "Legal assistance": 2500,
-                "Business planning": 1000,
-                "Initial operating capital": 10000,
-            },
+            "costs_to_budget": [
+                "State filing fees for incorporation",
+                "Legal help with bylaws and securities rules for member shares",
+                "Business planning",
+                "Startup capital",
+            ],
             "resources": [
                 {
                     "name": "US Federation of Worker Cooperatives",
@@ -372,17 +374,13 @@ class SolidarityEconomyChip(BaseSkillChip):
 
         if not coops:
             return SkillResponse(
-                content="No cooperatives found matching your criteria.\n\n"
-                "Consider:\n"
-                "- Expanding your search area\n"
-                "- Trying different industry filters\n"
-                "- Starting a new cooperative!",
+                content=(f"{not_connected('A cooperative registry', 'I can\'t search co-ops for you')} National "
+                         "networks, like the US Federation of Worker Cooperatives (usworker.coop), can point you to "
+                         "co-ops near you."),
                 success=True,
-                data={"coops": []},
+                data={"coops": [], "connected": False},
                 suggestions=[
-                    "Expand search",
-                    "Start a new coop",
-                    "Find coop developers",
+                    "Get co-op formation steps",
                 ],
             )
 
@@ -408,9 +406,7 @@ class SolidarityEconomyChip(BaseSkillChip):
                 ],
             },
             suggestions=[
-                "Learn more about a coop",
-                "Apply for membership",
-                "Connect with coop networks",
+                "Get co-op formation steps",
             ],
         )
 
@@ -432,50 +428,8 @@ class SolidarityEconomyChip(BaseSkillChip):
         Returns:
             List of matching cooperatives
         """
-        # In production, this would query the coop_registry span
-        sample_coops = [
-            Cooperative(
-                coop_id="coop_001",
-                name="Green City Grocery",
-                coop_type=CoopType.CONSUMER,
-                status=CoopStatus.ESTABLISHED,
-                location="Oakland, CA",
-                members=2500,
-                founded=2012,
-                industry="Grocery/Food Retail",
-                description="Community-owned grocery store serving local neighborhoods",
-                contact="join@greencitygrocery.coop",
-                website="greencitygrocery.coop",
-                accepting_members=True,
-            ),
-            Cooperative(
-                coop_id="coop_002",
-                name="Tech Workers Collective",
-                coop_type=CoopType.WORKER,
-                status=CoopStatus.OPERATING,
-                location="San Francisco, CA",
-                members=15,
-                founded=2019,
-                industry="Technology/Software",
-                description="Worker-owned software development cooperative",
-                contact="hello@techworkerscollective.coop",
-                website="techworkerscollective.coop",
-                accepting_members=True,
-            ),
-            Cooperative(
-                coop_id="coop_003",
-                name="Community Land Trust",
-                coop_type=CoopType.HOUSING,
-                status=CoopStatus.ESTABLISHED,
-                location="Berkeley, CA",
-                members=120,
-                founded=2008,
-                industry="Housing",
-                description="Permanently affordable community-controlled housing",
-                contact="info@communityland.coop",
-                accepting_members=False,
-            ),
-        ]
+        # No coop_registry span is wired yet: there are no co-ops to list, and none is made up.
+        sample_coops: list[Cooperative] = []
 
         results = sample_coops
 
@@ -512,39 +466,15 @@ class SolidarityEconomyChip(BaseSkillChip):
             recipient=recipient,
         )
 
+        ledger_missing = not_connected("A time-bank ledger", "{}")
         if action == "balance":
-            account = result["account"]
-            content = "**Your Time Bank Account**\n\n"
-            content += f"Current Balance: {account.balance_hours:.1f} hours\n"
-            content += f"Total Earned: {account.earned_total:.1f} hours\n"
-            content += f"Total Spent: {account.spent_total:.1f} hours\n\n"
-
-            content += "**Services You Offer:**\n"
-            for svc in account.services_offered:
-                content += f"- {svc}\n"
-
-            content += "\n**Services You Need:**\n"
-            for svc in account.services_needed:
-                content += f"- {svc}\n"
-
+            content = ledger_missing.format("I can't see anyone's balance") + " Ask your time bank's coordinator."
         elif action == "exchange":
-            content = "**Time Bank Exchange**\n\n"
-            content += f"Service: {service}\n"
-            content += f"Hours: {hours}\n"
-            content += f"Recipient: {recipient}\n"
-            content += f"Status: {result['status']}\n"
-
-            if result.get("requires_approval"):
-                content += "\n*This exchange requires verification before credits transfer.*"
-
+            content = (f"**Time Bank Exchange**\n\nService: {service}\nHours: {hours}\nRecipient: {recipient}\n\n"
+                       + ledger_missing.format("this exchange has not been recorded and no credits have moved")
+                       + " Record it with your time bank's coordinator.")
         elif action == "browse":
-            content = "**Available Services in Time Bank**\n\n"
-            for category, services in result["available_services"].items():
-                content += f"**{category}:**\n"
-                for svc in services:
-                    content += f"- {svc['name']} ({svc['provider']})\n"
-                content += "\n"
-
+            content = ledger_missing.format("I can't list the services members offer") + " Ask your time bank's coordinator."
         else:
             content = f"Action '{action}' not recognized. Try: balance, exchange, browse"
 
@@ -554,11 +484,7 @@ class SolidarityEconomyChip(BaseSkillChip):
             data=result,
             requires_consensus=action == "exchange" and hours and hours > 5,
             consensus_action="time_bank_withdrawal" if action == "exchange" else None,
-            suggestions=[
-                "Browse available services",
-                "Offer a new service",
-                "View exchange history",
-            ],
+            suggestions=[],
         )
 
     async def manage_time_bank(
@@ -581,45 +507,12 @@ class SolidarityEconomyChip(BaseSkillChip):
         Returns:
             Time bank operation result
         """
-        # In production, this would query the time_bank_ledger span
-        if action == "balance":
-            return {
-                "account": TimeBankAccount(
-                    account_id=f"tb_{user_id}",
-                    member_id=user_id,
-                    balance_hours=12.5,
-                    earned_total=25.0,
-                    spent_total=12.5,
-                    services_offered=["Gardening", "Computer repair", "Tutoring"],
-                    services_needed=["House cleaning", "Cooking", "Transportation"],
-                    last_transaction=datetime(2024, 1, 15, tzinfo=timezone.utc),
-                ),
-            }
-        elif action == "exchange":
-            return {
-                "status": "Pending Verification",
-                "transaction_id": f"tx_{datetime.now().strftime('%Y%m%d%H%M')}",
-                "hours": hours,
-                "service": service,
-                "requires_approval": hours and hours > 5,
-            }
-        elif action == "browse":
-            return {
-                "available_services": {
-                    "Home & Garden": [
-                        {"name": "Lawn mowing", "provider": "John D."},
-                        {"name": "Home repair", "provider": "Maria G."},
-                    ],
-                    "Education": [
-                        {"name": "Spanish tutoring", "provider": "Carlos R."},
-                        {"name": "Math help", "provider": "Susan K."},
-                    ],
-                    "Technology": [
-                        {"name": "Computer setup", "provider": "Alex T."},
-                        {"name": "Phone troubleshooting", "provider": "Kim L."},
-                    ],
-                },
-            }
+        # No time_bank_ledger span is wired yet: no balance, member or service is known, and nothing is recorded.
+        if action == "exchange":
+            return {"recorded": False, "connected": False, "hours": hours, "service": service,
+                    "requires_approval": bool(hours and hours > 5)}
+        if action in ("balance", "browse"):
+            return {"connected": False}
         return {}
 
     async def _handle_cdfi_loan(
@@ -648,18 +541,14 @@ class SolidarityEconomyChip(BaseSkillChip):
 
         if not loans:
             return SkillResponse(
-                content="No CDFI loan products found matching your criteria.\n\n"
-                "CDFIs (Community Development Financial Institutions) provide "
-                "affordable lending to underserved communities. Try:\n"
-                "- Adjusting loan amount\n"
-                "- Broadening location search\n"
-                "- Checking traditional small business resources",
+                content=("CDFIs (Community Development Financial Institutions) lend to communities banks underserve, "
+                         "co-ops included.\n\n"
+                         f"{not_connected('A CDFI directory', 'I can\'t list lenders, loans or terms')} The U.S. "
+                         "Treasury's CDFI Fund lists certified CDFIs by state; ask each one for its current terms."),
                 success=True,
-                data={"loans": []},
+                data={"loans": [], "connected": False},
                 suggestions=[
-                    "Learn about CDFIs",
-                    "Find local credit unions",
-                    "Explore cooperative financing",
+                    "Get co-op formation steps",
                 ],
             )
 
@@ -692,11 +581,7 @@ class SolidarityEconomyChip(BaseSkillChip):
             },
             requires_consensus=True,
             consensus_action="cdfi_loan_application",
-            suggestions=[
-                "Start loan application",
-                "Compare loan terms",
-                "Connect with CDFI advisor",
-            ],
+            suggestions=[],
         )
 
     async def find_cdfi_lending(
@@ -717,50 +602,9 @@ class SolidarityEconomyChip(BaseSkillChip):
         Returns:
             List of matching CDFI loan products
         """
-        # In production, this would query the cdfi_network span
-        return [
-            CDFILoan(
-                loan_id="cdfi_001",
-                cdfi_name="Community Development Fund",
-                loan_type="Small Business Loan",
-                min_amount=5000,
-                max_amount=100000,
-                interest_rate="6-9% fixed",
-                term_months=60,
-                requirements=[
-                    "Business plan",
-                    "Financial statements",
-                    "2 years tax returns",
-                ],
-                eligible_uses=[
-                    "Working capital",
-                    "Equipment purchase",
-                    "Real estate acquisition",
-                    "Business expansion",
-                ],
-                location_served="California",
-            ),
-            CDFILoan(
-                loan_id="cdfi_002",
-                cdfi_name="Cooperative Fund of the Northeast",
-                loan_type="Cooperative Development Loan",
-                min_amount=25000,
-                max_amount=500000,
-                interest_rate="5-7% fixed",
-                term_months=84,
-                requirements=[
-                    "Cooperative structure",
-                    "Member equity contribution",
-                    "Governance documents",
-                ],
-                eligible_uses=[
-                    "Cooperative startup",
-                    "Conversion to cooperative",
-                    "Cooperative expansion",
-                ],
-                location_served="Northeast US (will consider others)",
-            ),
-        ]
+        # No cdfi_network span is wired yet: no lender, product or rate is listed, and none is made up (one invented
+        # set of terms was given a real lender's name until 10-19).
+        return []
 
     async def _handle_solidarity_resource(
         self, request: SkillRequest, context: SkillContext
@@ -781,7 +625,7 @@ class SolidarityEconomyChip(BaseSkillChip):
         content = f"**Solidarity Economy Resources: {resource_type.title()}**\n\n"
 
         if resources.get("templates"):
-            content += "**Templates & Documents:**\n"
+            content += "**Documents a co-op usually needs** (no templates are included here):\n"
             for template in resources["templates"]:
                 content += f"- {template['name']}: {template['description']}\n"
             content += "\n"
@@ -794,7 +638,7 @@ class SolidarityEconomyChip(BaseSkillChip):
             content += "\n"
 
         if resources.get("education"):
-            content += "**Educational Resources:**\n"
+            content += "**Worth looking for locally:**\n"
             for edu in resources["education"]:
                 content += f"- {edu}\n"
 
@@ -803,9 +647,7 @@ class SolidarityEconomyChip(BaseSkillChip):
             success=True,
             data=resources,
             suggestions=[
-                "Download governance templates",
-                "Find a coop developer",
-                "Join a solidarity economy network",
+                "Get co-op formation steps",
             ],
         )
 
@@ -824,18 +666,9 @@ class SolidarityEconomyChip(BaseSkillChip):
         return {
             "type": resource_type,
             "templates": [
-                {
-                    "name": "Worker Cooperative Bylaws",
-                    "description": "Template bylaws for worker-owned cooperatives",
-                },
-                {
-                    "name": "Operating Agreement",
-                    "description": "Member operating agreement template",
-                },
-                {
-                    "name": "Member Equity Agreement",
-                    "description": "Template for member buy-in and patronage",
-                },
+                {"name": "Bylaws", "description": "how members govern and vote"},
+                {"name": "Operating agreement", "description": "how the business runs day to day"},
+                {"name": "Member equity agreement", "description": "member buy-in and how surplus is divided"},
             ],
             "organizations": [
                 {
@@ -850,10 +683,9 @@ class SolidarityEconomyChip(BaseSkillChip):
                 },
             ],
             "education": [
-                "Cooperative 101 online course",
-                "Time banking fundamentals webinar",
-                "Solidarity economy reading list",
-                "Local coop incubator programs",
+                "An introductory co-op course",
+                "A guide to running a time bank",
+                "A co-op incubator or development center near you",
             ],
         }
 

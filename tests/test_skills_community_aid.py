@@ -1252,10 +1252,8 @@ class TestSolidarityEconomyChip:
         )
         response = await solidarity_chip.handle(request, context)
         assert response.success
-        # Should return account info with balance
-        assert "account" in response.data
-        account = response.data["account"]
-        assert hasattr(account, "balance_hours")
+        # No ledger is connected, so no balance is shown (10-19: every member was told 12.5 hours)
+        assert response.data["connected"] is False and "isn't connected" in response.content
 
     @pytest.mark.asyncio
     async def test_coop_search_intent(
