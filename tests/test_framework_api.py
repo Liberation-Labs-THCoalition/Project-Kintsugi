@@ -114,11 +114,16 @@ async def test_oracle_verdicts_populated_by_messages(client):
 
 
 async def test_events_recent(client):
-    resp = await client.get("/api/v1/events/recent")
-    assert resp.status_code == 200
-    events = resp.json()["events"]
-    # earlier tests generated agent/session events through the shared bus
-    assert any(e["type"].startswith("agent.") for e in events)
+    # Its own agent event, not one an earlier test happened to leave on the shared bus (2026-10-19).
+    resp = await client.post("/api/v1/agents", json={"personality": "default"})
+    agent_id = resp.json()["id"]
+    try:
+        resp = await client.get("/api/v1/events/recent")
+        assert resp.status_code == 200
+        events = resp.json()["events"]
+        assert any(e["type"].startswith("agent.") for e in events), [e["type"] for e in events][-10:]
+    finally:
+        await client.delete(f"/api/v1/agents/{agent_id}")
 
 
 async def test_dashboard_renders(client):

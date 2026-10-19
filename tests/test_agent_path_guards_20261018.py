@@ -115,10 +115,12 @@ class _Boom:
 
 
 @pytest.mark.asyncio
-async def test_a_failed_skill_on_the_agent_path_names_an_error_id_not_the_exception(caplog):
+async def test_a_failed_skill_on_the_agent_path_names_an_error_id_not_the_exception(caplog, monkeypatch):
     events = []
     agent = _agent(_Boom())
-    agent._events.publish = lambda name, data, **kw: events.append((name, data))
+    # agent._events is the global bus: patch it through monkeypatch so it's put back. Assigned directly, it swallowed
+    # every later event in the process (test_events_recent, whole suite in one process, 10-19).
+    monkeypatch.setattr(agent._events, "publish", lambda name, data, **kw: events.append((name, data)))
     result = await agent.handle_message("hello", user_id="key:k1")
     assert "SECRET" not in result.response and "error " in result.response
     failed = [d for n, d in events if n == "skill.failed"]
