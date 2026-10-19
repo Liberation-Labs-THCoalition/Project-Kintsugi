@@ -59,7 +59,6 @@ def _walk_strings(path: Path):
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
     "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
 }
 
@@ -242,6 +241,7 @@ REAL_CHIPS = {
     "DonorStewardshipChip": "drafts from what it's given, with [gaps]; no invented donor, tax fact or figure (10-19)",
     "BoardLiaisonChip": "agendas, minutes and reports as drafts with [gaps]; no invented vote, status or figure (10-19)",
     "GrantHunterChip": "no invented grant, deadline or pipeline; eligibility unknown until it can be checked (10-19)",
+    "CoalitionBuilderChip": "real records; says nothing was sent or invited; metrics only from its records (10-19)",
 }
 
 
@@ -942,3 +942,26 @@ async def test_eligibility_is_unknown_not_yes():
     r = await _grants("grant_eligibility", grant_id="anything-at-all")
     assert r.data["is_eligible"] is None and "UNKNOWN" in r.content and "ELIGIBLE**" not in r.content.replace("UNKNOWN", "")
     assert r.data["met_criteria"] == [] and "501(c)(3)" not in r.content
+
+
+# ---- coalition builder: the repairs ------------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_outreach_and_meetings_are_recorded_and_say_nothing_was_sent():
+    from kintsugi.skills.community_aid.coalition_builder import CoalitionBuilderChip
+    chip = CoalitionBuilderChip()
+    o = await chip.handle(SkillRequest(intent="partner_outreach", raw_input="o", entities={
+        "action": "send", "partner_id": "p-1", "message": "hello"}), _ctx())
+    assert "recorded here" in o.content and "Outreach sent" not in o.content and _claims_in(o.content) == []
+    m = await chip.handle(SkillRequest(intent="meeting_schedule", raw_input="m", entities={
+        "action": "schedule", "title": "Planning", "scheduled_at": "2026-10-22T18:00:00", "partner_ids": ["p-1"]}), _ctx())
+    assert "No invitations have gone out" in m.content and "Invitations sent" not in m.content
+
+
+@pytest.mark.asyncio
+async def test_the_report_carries_no_placeholder_metric():
+    from kintsugi.skills.community_aid.coalition_builder import CoalitionBuilderChip
+    r = await CoalitionBuilderChip().handle(SkillRequest(intent="coalition_report", raw_input="r"), _ctx())
+    metrics = r.data["metrics"]
+    assert set(metrics) == {"outreach_recorded", "outreach_responded"} and "0.82" not in str(r.data)
+    assert "isn't applied" in r.content

@@ -45,6 +45,7 @@ from uuid import uuid4
 
 from kintsugi.skills.base import consent_given
 from kintsugi.skills.base import org_scoped  # records kept per organisation
+from kintsugi.skills.honesty import NOBODY_CONTACTED
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -236,6 +237,9 @@ class CoalitionBuilderChip(BaseSkillChip):
         "campaign_tools",
         "shared_calendar",
     ]
+    # Honest (kintsugi/skills/honesty.py): partners, outreach, campaigns and meetings are real records here; nothing is
+    # sent, invited or reminded, and every response says so. Report metrics come only from those records.
+    simulated = False
 
     # Simulated storage
     _partners: dict[str, PartnerOrganization] = org_scoped(dict)
@@ -296,10 +300,7 @@ class CoalitionBuilderChip(BaseSkillChip):
                 content="No partners found matching your criteria.",
                 success=True,
                 data={"partners": [], "count": 0},
-                suggestions=[
-                    "Try broadening your search criteria",
-                    "Add a potential partner with 'add partner organization'",
-                ],
+                suggestions=["Try broadening your search criteria"],
             )
 
         summary_lines = [f"Found {len(partners)} partner(s):"]
@@ -323,10 +324,7 @@ class CoalitionBuilderChip(BaseSkillChip):
                 "partners": [self._partner_to_dict(p) for p in partners],
                 "count": len(partners),
             },
-            suggestions=[
-                "Initiate outreach with 'reach out to [partner name]'",
-                "View partner details with 'show partner profile [name]'",
-            ],
+            suggestions=["Record outreach with 'reach out to [partner name]'"],
         )
 
     async def _handle_partner_outreach(
@@ -367,8 +365,8 @@ class CoalitionBuilderChip(BaseSkillChip):
         partner_name = partner.name if partner else "Unknown"
 
         return SkillResponse(
-            content=f"Outreach sent to {partner_name} via {outreach.outreach_type}.\n"
-                    f"Outreach ID: {outreach.id[:8]}...",
+            content=f"Outreach to {partner_name} by {outreach.outreach_type} recorded here (ID: {outreach.id[:8]}...). "
+                    f"{NOBODY_CONTACTED} Send it yourselves.",
             success=True,
             data={
                 "outreach_id": outreach.id,
@@ -376,10 +374,7 @@ class CoalitionBuilderChip(BaseSkillChip):
                 "type": outreach.outreach_type,
                 "status": outreach.status,
             },
-            suggestions=[
-                "Set reminder with 'remind me to follow up in [days] days'",
-                "View outreach history with 'show outreach history [partner]'",
-            ],
+            suggestions=["View outreach history with 'show outreach history [partner]'"],
         )
 
     async def _record_outreach(
@@ -404,8 +399,9 @@ class CoalitionBuilderChip(BaseSkillChip):
                 outreach.follow_up_date = follow_up
 
         return SkillResponse(
-            content=f"Outreach recorded. Follow-up scheduled for "
-                    f"{outreach.follow_up_date.strftime('%Y-%m-%d') if outreach.follow_up_date else 'TBD'}.",
+            content=f"Outreach recorded. Follow-up date on the record: "
+                    f"{outreach.follow_up_date.strftime('%Y-%m-%d') if outreach.follow_up_date else 'none'} "
+                    f"(no reminder is set).",
             success=True,
             data={"outreach_id": outreach.id},
         )
@@ -494,10 +490,7 @@ class CoalitionBuilderChip(BaseSkillChip):
                         f"Status: {campaign.status.value}",
                 success=True,
                 data=self._campaign_to_dict(campaign),
-                suggestions=[
-                    "Add partners with 'add partner to campaign [id]'",
-                    "Launch campaign with 'launch campaign [id]'",
-                ],
+                suggestions=[],
             )
 
         elif action == "join":
@@ -559,9 +552,9 @@ class CoalitionBuilderChip(BaseSkillChip):
             )
 
             return SkillResponse(
-                content=f"Meeting '{meeting.title}' scheduled for "
-                        f"{meeting.scheduled_at.strftime('%Y-%m-%d %H:%M')}.\n"
-                        f"Invitations sent to {len(meeting.invited_partner_ids)} partners.",
+                content=f"Meeting '{meeting.title}' recorded for "
+                        f"{meeting.scheduled_at.strftime('%Y-%m-%d %H:%M')} with {len(meeting.invited_partner_ids)} "
+                        f"partner(s) on the invite list. No invitations have gone out: send them yourselves.",
                 success=True,
                 data={
                     "meeting_id": meeting.id,
@@ -569,10 +562,7 @@ class CoalitionBuilderChip(BaseSkillChip):
                     "scheduled_at": meeting.scheduled_at.isoformat(),
                     "invited": len(meeting.invited_partner_ids),
                 },
-                suggestions=[
-                    "Add agenda items with 'add to meeting agenda'",
-                    "Send reminder with 'send meeting reminder'",
-                ],
+                suggestions=[],
             )
 
         else:  # list
@@ -630,10 +620,7 @@ class CoalitionBuilderChip(BaseSkillChip):
             content=report["summary"],
             success=True,
             data=report,
-            suggestions=[
-                "Share report with 'share coalition report with partners'",
-                "Export as PDF with 'export coalition report'",
-            ],
+            suggestions=[],
         )
 
     # Core business logic methods
@@ -731,7 +718,7 @@ class CoalitionBuilderChip(BaseSkillChip):
             summary=message,
             response=None,
             follow_up_date=now + timedelta(days=7),  # Default 7-day follow-up
-            status="sent",
+            status="recorded",  # nothing is sent: no messaging span is wired
         )
 
         self._outreach[outreach.id] = outreach
@@ -907,7 +894,7 @@ class CoalitionBuilderChip(BaseSkillChip):
 
         # Generate summary
         summary = (
-            f"Coalition Report ({period})\n"
+            f"Coalition Report (all records to date; '{period}' isn't applied)\n"
             f"========================\n\n"
             f"Partnership Network:\n"
             f"  - Total partners: {total_partners}\n"
@@ -916,7 +903,7 @@ class CoalitionBuilderChip(BaseSkillChip):
             f"  - Total campaigns: {total_campaigns}\n"
             f"  - Active campaigns: {active_campaigns}\n\n"
             f"Meetings:\n"
-            f"  - Meetings held: {total_meetings}\n\n"
+            f"  - Meetings on record: {total_meetings}\n\n"
             f"Focus Areas:\n"
         )
 
@@ -930,16 +917,18 @@ class CoalitionBuilderChip(BaseSkillChip):
             "active_partners": active_partners,
             "total_campaigns": total_campaigns,
             "active_campaigns": active_campaigns,
-            "meetings_held": total_meetings,
+            "meetings_on_record": total_meetings,
             "focus_breakdown": focus_breakdown,
         }
 
         if include_metrics:
+            # Only what the records can say: the outreach response rate. Growth, completion and attendance need
+            # dated history this chip doesn't keep, so they're not reported (they used to be placeholders).
+            outreach = list(self._outreach.values())
+            responded = sum(1 for o in outreach if o.status == "responded")
             report["metrics"] = {
-                "partnership_growth_rate": 0.15,  # Placeholder
-                "campaign_completion_rate": 0.75,
-                "meeting_attendance_rate": 0.82,
-                "outreach_response_rate": 0.45,
+                "outreach_recorded": len(outreach),
+                "outreach_responded": responded,
             }
 
         return report
