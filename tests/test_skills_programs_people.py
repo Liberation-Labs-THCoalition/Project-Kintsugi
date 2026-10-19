@@ -324,8 +324,9 @@ class TestDonorStewardshipChip:
         )
         response = await chip.handle(request, context)
         assert response.success
-        assert "acknowledgment" in response.data
-        assert "donor_summary" in response.data
+        # A draft from what it was given, not sent; no invented donor summary (10-19: every letter went to "Sarah")
+        ack = response.data["acknowledgment"]
+        assert ack["sent"] is False and "Sarah" not in response.content and "donor_summary" not in response.data
 
     @pytest.mark.asyncio
     async def test_handle_donor_profile(self, chip, context):
@@ -335,10 +336,8 @@ class TestDonorStewardshipChip:
             entities={"donor_id": "donor_001"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "profile" in response.data
-        assert "donor_level" in response.data["profile"]
-        assert "giving_summary" in response.data["profile"]
+        # No donor database: no profile is invented (10-19)
+        assert response.success and response.data["profile"] is None
 
     @pytest.mark.asyncio
     async def test_handle_giving_history(self, chip, context):
@@ -371,9 +370,8 @@ class TestDonorStewardshipChip:
             entities={"period": "quarterly"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "stewardship_report" in response.data
-        assert "summary" in response.data["stewardship_report"]
+        # No donor database: no report figures are invented (10-19)
+        assert response.success and response.data["stewardship_report"] is None
 
 
 # ==============================================================================
@@ -826,12 +824,7 @@ class TestResponseStructure:
         response = await chip.handle(request, context)
 
         profile = response.data["profile"]
-        assert "donor_id" in profile
-        assert "name" in profile
-        assert "email" in profile
-        assert "donor_level" in profile
-        assert "giving_summary" in profile
-        assert "engagement" in profile
+        assert profile is None
 
     @pytest.mark.asyncio
     async def test_staff_onboarding_plan_structure(self, context):

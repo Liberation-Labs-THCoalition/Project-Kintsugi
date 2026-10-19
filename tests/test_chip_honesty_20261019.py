@@ -60,7 +60,6 @@ def _walk_strings(path: Path):
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
-    "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
     "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
     "board_liaison.py": "invented minutes, motions, votes, compliance status and board report",
     "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
@@ -241,6 +240,7 @@ REAL_CHIPS = {
     "ResourceRedistributionChip": "real records; says pickups and partners are recorded, nobody told (10-19)",
     "SolidarityEconomyChip": "formation guidance and real networks; no invented co-op, balance, loan or cost (10-19)",
     "VolunteerCoordinatorChip": "the deployment's roster and sender or none; sends nothing it can't, saves nothing (10-19)",
+    "DonorStewardshipChip": "drafts from what it's given, with [gaps]; no invented donor, tax fact or figure (10-19)",
 }
 
 
@@ -836,3 +836,48 @@ async def test_the_example_tiers_stay_in_sample_mode_until_the_organization_give
     r = await own.handle(SkillRequest(intent="benefits_info", raw_input="b", entities={"tier": "member"}), _ctx())
     assert not r.content.startswith(SAMPLE_NOTICE) and "$20.00" in r.content
     assert not MemberServicesChip.simulated is False                   # the class default is still sample
+
+
+# ---- donor stewardship: the repairs ------------------------------------------------------------------------------------
+
+async def _donor(intent, **entities):
+    from kintsugi.skills.programs_people.donor_stewardship import DonorStewardshipChip
+    return await DonorStewardshipChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_a_receipt_never_asserts_no_goods_or_services_unless_told():
+    unknown = await _donor("donor_thank", gift_amount=500)
+    ack = unknown.data["acknowledgment"]
+    assert "No goods or services" not in ack["receipt"]["statement"] and ack["tax_deductible_amount"] is None
+    assert "$250 or more" in unknown.content and ack["sent"] is False
+    told = await _donor("donor_thank", gift_amount=500, goods_or_services_value=0)
+    assert told.data["acknowledgment"]["receipt"]["statement"].startswith("No goods or services")
+    gala = await _donor("donor_thank", gift_amount=500, goods_or_services_value=120)
+    assert gala.data["acknowledgment"]["tax_deductible_amount"] == 380
+
+
+@pytest.mark.asyncio
+async def test_the_letter_uses_the_donors_name_or_a_gap_and_invents_no_impact():
+    named = await _donor("donor_thank", gift_amount=50, donor_name="Ruth")
+    letter = named.data["acknowledgment"]["letter"]
+    assert letter["salutation"] == "Dear Ruth," and "1,800" not in str(letter) and "since" not in str(letter)
+    unnamed = await _donor("donor_thank", gift_amount=50)
+    assert unnamed.data["acknowledgment"]["letter"]["salutation"] == "Dear [Donor name],"
+    assert unnamed.data["acknowledgment"]["receipt"]["organization_name"] == "[Organization name]"
+
+
+@pytest.mark.asyncio
+async def test_no_donor_profile_analysis_or_report_is_invented():
+    for intent, key in (("donor_profile", "profile"), ("giving_history", "giving_analysis"),
+                        ("stewardship_report", "stewardship_report")):
+        r = await _donor(intent, donor_id="d-1")
+        assert r.data[key] is None and "isn't connected" in r.content and "$" not in r.content, intent
+
+
+@pytest.mark.asyncio
+async def test_a_cultivation_plan_is_a_draft_with_suggested_dates():
+    r = await _donor("cultivation_plan", donor_id="d-1")
+    plan = r.data["cultivation_plan"]
+    assert plan["saved"] is False and all("suggested_date" in a and "scheduled_date" not in a for a in plan["activities"])
+    assert "nothing has been saved or scheduled" in r.content and "education/youth" not in str(plan)

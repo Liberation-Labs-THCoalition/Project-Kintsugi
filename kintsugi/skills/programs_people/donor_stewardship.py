@@ -25,6 +25,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -131,6 +132,11 @@ class DonorStewardshipChip(BaseSkillChip):
     }
 
     required_spans = ["crm_api", "email_service", "gift_tracking"]
+    # Honest without its spans (kintsugi/skills/honesty.py): no donor, gift, figure or analysis is invented. A thank-you
+    # is a draft built from what it was given, with [bracketed] gaps for the rest; it never asserts a tax fact it
+    # wasn't told, and it isn't sent. Profiles, giving analysis and reports say no donor database is connected.
+    simulated = False
+    NO_CRM = not_connected("A donor database", "{}")
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -218,86 +224,67 @@ class DonorStewardshipChip(BaseSkillChip):
         designation = request.entities.get("designation", "unrestricted")
         include_impact = request.entities.get("include_impact", True)
 
-        # Simulated donor lookup (would query CRM)
-        donor = DonorProfile(
-            donor_id=donor_id,
-            name="Sarah Johnson",
-            email="sarah.johnson@email.com",
-            donor_level="patron" if gift_amount >= 1000 else "supporter",
-            first_gift_date=datetime(2022, 5, 15, tzinfo=timezone.utc),
-            total_lifetime_giving=5250.0 + gift_amount,
-            interests=["education", "youth programs"],
-        )
+        donor_name = request.entities.get("donor_name") or "[Donor name]"
+        org_name = request.entities.get("org_name") or "[Organization name]"
+        # Goods or services given in return: only what we're told. Unknown is a gap to fill, never "none".
+        returned_value = request.entities.get("goods_or_services_value")
 
-        # Determine acknowledgment tier
         if gift_amount >= 10000:
-            tier = "champion"
-            signatory = "Board Chair"
+            tier, signatory = "champion", "Board Chair"
         elif gift_amount >= 5000:
-            tier = "benefactor"
-            signatory = "Executive Director"
+            tier, signatory = "benefactor", "Executive Director"
         elif gift_amount >= 1000:
-            tier = "patron"
-            signatory = "Development Director"
+            tier, signatory = "patron", "Development Director"
         else:
-            tier = "supporter"
-            signatory = "Development Team"
+            tier, signatory = "supporter", "Development Team"
 
-        # Build acknowledgment content
+        if returned_value is None:
+            statement = ("[State whether any goods or services were given in return for this gift and, if so, a "
+                         "good-faith estimate of their value.]")
+            deductible = None
+        elif returned_value == 0:
+            statement = f"No goods or services were provided in exchange for this gift of ${gift_amount:,.2f}."
+            deductible = gift_amount
+        else:
+            statement = (f"In return for this gift of ${gift_amount:,.2f}, goods or services worth about "
+                         f"${returned_value:,.2f} were provided.")
+            deductible = max(0, gift_amount - returned_value)
+
         acknowledgment = {
-            "acknowledgment_id": f"ack_{uuid4().hex[:8]}",
             "donor_id": donor_id,
             "gift_amount": gift_amount,
-            "gift_date": datetime.now(timezone.utc).isoformat(),
             "gift_type": gift_type,
             "designation": designation,
             "tier": tier,
-            "tax_deductible_amount": gift_amount,  # Assuming no goods/services provided
+            "tax_deductible_amount": deductible,
             "receipt": {
-                "organization_name": "Community Impact Organization",
-                "ein": "XX-XXXXXXX",
-                "address": "123 Main Street, Anytown, ST 12345",
-                "statement": f"No goods or services were provided in exchange for this gift of ${gift_amount:,.2f}.",
+                "organization_name": org_name,
+                "ein": "[EIN]",
+                "address": "[Organization address]",
+                "statement": statement,
             },
             "letter": {
-                "salutation": f"Dear {donor.name.split()[0]},",
+                "salutation": f"Dear {donor_name},",
                 "opening": f"Thank you for your generous gift of ${gift_amount:,.2f} to support our mission.",
-                "impact_statement": (
-                    f"Your support makes a real difference. This year, donors like you have helped us "
-                    f"serve over 1,800 community members through our programs."
-                ) if include_impact else None,
-                "personal_note": (
-                    f"As a loyal supporter since {donor.first_gift_date.year}, your continued "
-                    f"commitment inspires our work every day."
-                ),
+                "impact_statement": ("[One specific result of your work this gift supports, in your own numbers.]"
+                                     if include_impact else None),
                 "closing": "With gratitude,",
                 "signatory": signatory,
             },
-            "delivery_method": donor.communication_preference,
+            "sent": False,
         }
 
+        note = (" For a gift of $250 or more, US tax rules require the receipt to say whether goods or services "
+                "were given in return." if gift_amount >= 250 else "")
         requires_approval = self.requires_consensus("send_acknowledgment")
-
         return SkillResponse(
-            content=f"Generated {tier}-level thank you acknowledgment for ${gift_amount:,.2f} gift. "
-                    f"Ready to send via {donor.communication_preference}.",
+            content=(f"Drafted a {tier}-level thank-you for a ${gift_amount:,.2f} gift. Not sent: fill the "
+                     f"[bracketed] parts and review it first.{note}"),
             success=True,
-            data={
-                "acknowledgment": acknowledgment,
-                "donor_summary": {
-                    "name": donor.name,
-                    "level": tier,
-                    "lifetime_giving": donor.total_lifetime_giving,
-                    "first_gift_year": donor.first_gift_date.year if donor.first_gift_date else None,
-                },
-            },
+            data={"acknowledgment": acknowledgment},
             requires_consensus=requires_approval,
             consensus_action="send_acknowledgment" if requires_approval else None,
-            suggestions=[
-                "Would you like to personalize the message further?",
-                "Should I schedule a follow-up call?",
-                "Want to add to the cultivation plan?",
-            ],
+            suggestions=["Draft a cultivation plan for this donor"],
         )
 
     async def _get_donor_profile(
@@ -314,115 +301,11 @@ class DonorStewardshipChip(BaseSkillChip):
         donor_id = request.entities.get("donor_id", "")
         update_fields = request.entities.get("update", {})
 
-        # Simulated donor profile (would query CRM)
-        profile = DonorProfile(
-            donor_id=donor_id,
-            name="Sarah Johnson",
-            email="sarah.johnson@email.com",
-            phone="(555) 123-4567",
-            donor_level="patron",
-            first_gift_date=datetime(2022, 5, 15, tzinfo=timezone.utc),
-            total_lifetime_giving=5250.0,
-            communication_preference="email",
-            interests=["education", "youth programs", "community development"],
-            notes="Met at 2023 gala. Interested in board service.",
-        )
-
-        # Simulated giving history
-        gifts = [
-            Gift(
-                gift_id="gift_001",
-                donor_id=donor_id,
-                amount=500.0,
-                gift_date=datetime(2022, 5, 15, tzinfo=timezone.utc),
-                gift_type="one_time",
-                campaign="Spring Appeal",
-                acknowledged=True,
-            ),
-            Gift(
-                gift_id="gift_002",
-                donor_id=donor_id,
-                amount=1000.0,
-                gift_date=datetime(2022, 12, 20, tzinfo=timezone.utc),
-                gift_type="one_time",
-                campaign="Year-End Campaign",
-                designation="youth programs",
-                acknowledged=True,
-            ),
-            Gift(
-                gift_id="gift_003",
-                donor_id=donor_id,
-                amount=1500.0,
-                gift_date=datetime(2023, 6, 1, tzinfo=timezone.utc),
-                gift_type="one_time",
-                campaign="Annual Gala",
-                acknowledged=True,
-            ),
-            Gift(
-                gift_id="gift_004",
-                donor_id=donor_id,
-                amount=2250.0,
-                gift_date=datetime(2023, 12, 15, tzinfo=timezone.utc),
-                gift_type="one_time",
-                campaign="Year-End Campaign",
-                designation="unrestricted",
-                acknowledged=True,
-            ),
-        ]
-
-        # Calculate giving metrics
-        current_year = datetime.now(timezone.utc).year
-        gifts_this_year = [g for g in gifts if g.gift_date.year == current_year]
-        gifts_last_year = [g for g in gifts if g.gift_date.year == current_year - 1]
-
-        profile_data = {
-            "donor_id": profile.donor_id,
-            "name": profile.name,
-            "email": profile.email,
-            "phone": profile.phone,
-            "donor_level": profile.donor_level,
-            "first_gift_date": profile.first_gift_date.isoformat() if profile.first_gift_date else None,
-            "total_lifetime_giving": profile.total_lifetime_giving,
-            "communication_preference": profile.communication_preference,
-            "interests": profile.interests,
-            "notes": profile.notes,
-            "giving_summary": {
-                "total_gifts": len(gifts),
-                "lifetime_total": sum(g.amount for g in gifts),
-                "average_gift": sum(g.amount for g in gifts) / len(gifts) if gifts else 0,
-                "largest_gift": max(g.amount for g in gifts) if gifts else 0,
-                "this_year_total": sum(g.amount for g in gifts_this_year),
-                "last_year_total": sum(g.amount for g in gifts_last_year),
-                "giving_trend": "increasing" if sum(g.amount for g in gifts_this_year) > sum(g.amount for g in gifts_last_year) else "stable",
-            },
-            "recent_gifts": [
-                {
-                    "gift_id": g.gift_id,
-                    "amount": g.amount,
-                    "date": g.gift_date.isoformat(),
-                    "campaign": g.campaign,
-                    "designation": g.designation,
-                }
-                for g in sorted(gifts, key=lambda x: x.gift_date, reverse=True)[:5]
-            ],
-            "engagement": {
-                "events_attended": 3,
-                "volunteer_hours": 12,
-                "referrals_made": 2,
-                "last_contact": (datetime.now(timezone.utc) - timedelta(days=45)).isoformat(),
-            },
-        }
-
         return SkillResponse(
-            content=f"Retrieved profile for {profile.name} ({profile.donor_level} level). "
-                    f"Lifetime giving: ${profile.total_lifetime_giving:,.2f} across {len(gifts)} gifts.",
+            content=self.NO_CRM.format(f"I can't look up {donor_id or 'that donor'}'s profile or gifts"),
             success=True,
-            data={"profile": profile_data},
-            suggestions=[
-                "Would you like to update any profile information?",
-                "Should I create a cultivation plan?",
-                "Want to see full giving history?",
-            ],
+            data={"profile": None, "connected": False},
+            suggestions=["Draft a thank-you letter"],
         )
 
     async def _analyze_giving(
@@ -440,85 +323,11 @@ class DonorStewardshipChip(BaseSkillChip):
         analysis_type = request.entities.get("analysis_type", "comprehensive")
         time_period = request.entities.get("period", "all_time")
 
-        # Simulated giving analysis
-        analysis = {
-            "donor_id": donor_id,
-            "analysis_date": datetime.now(timezone.utc).isoformat(),
-            "period": time_period,
-            "giving_pattern": {
-                "frequency": "annual",
-                "typical_timing": "year-end (December)",
-                "preferred_channels": ["online", "event"],
-                "responsive_to": ["email appeals", "personal asks"],
-            },
-            "trend_analysis": {
-                "year_over_year_growth": "+28.5%",
-                "average_gift_trend": "increasing",
-                "giving_consistency": "high",
-                "last_12_months": [
-                    {"month": "Jan", "amount": 0},
-                    {"month": "Feb", "amount": 0},
-                    {"month": "Mar", "amount": 0},
-                    {"month": "Apr", "amount": 0},
-                    {"month": "May", "amount": 0},
-                    {"month": "Jun", "amount": 1500},
-                    {"month": "Jul", "amount": 0},
-                    {"month": "Aug", "amount": 0},
-                    {"month": "Sep", "amount": 0},
-                    {"month": "Oct", "amount": 0},
-                    {"month": "Nov", "amount": 0},
-                    {"month": "Dec", "amount": 2250},
-                ],
-            },
-            "capacity_indicators": {
-                "wealth_screening_score": "medium-high",
-                "estimated_capacity": "$5,000-$10,000",
-                "current_giving_ratio": "45%",
-                "upgrade_potential": "high",
-            },
-            "affinity_indicators": {
-                "engagement_score": "high",
-                "years_giving": 2,
-                "event_participation": "regular",
-                "volunteer_involvement": True,
-                "board_potential": True,
-            },
-            "recommendations": [
-                {
-                    "recommendation": "Cultivate for major gift",
-                    "rationale": "High capacity and affinity indicators suggest readiness for larger ask",
-                    "suggested_ask": "$5,000",
-                    "timing": "Q4 2024",
-                },
-                {
-                    "recommendation": "Explore board service",
-                    "rationale": "Interest noted in profile, strong engagement history",
-                    "next_step": "Invitation to governance committee meeting",
-                },
-                {
-                    "recommendation": "Monthly giving conversion",
-                    "rationale": "Consistent annual donor may benefit from recurring giving option",
-                    "suggested_amount": "$100/month",
-                },
-            ],
-            "risk_factors": {
-                "lapse_risk": "low",
-                "downgrade_risk": "low",
-                "notes": "Highly engaged, no indicators of disengagement",
-            },
-        }
-
         return SkillResponse(
-            content=f"Completed {analysis_type} giving analysis. Donor shows high upgrade potential "
-                    f"with {analysis['trend_analysis']['year_over_year_growth']} year-over-year growth. "
-                    f"Recommended for major gift cultivation.",
+            content=self.NO_CRM.format(f"I have no gifts to analyse for {donor_id or 'that donor'}"),
             success=True,
-            data={"giving_analysis": analysis},
-            suggestions=[
-                "Would you like to create a cultivation plan based on this analysis?",
-                "Should I schedule a strategy meeting?",
-                "Want to compare with similar donors?",
-            ],
+            data={"giving_analysis": None, "connected": False},
+            suggestions=["Draft a cultivation plan for this donor"],
         )
 
     async def _create_cultivation_plan(
@@ -552,7 +361,7 @@ class DonorStewardshipChip(BaseSkillChip):
                 donor_id=donor_id,
                 activity_type="email",
                 scheduled_date=now + timedelta(days=30),
-                notes="Share program success story aligned with interests",
+                notes="Share a program story that fits their interests",
             ),
             CultivationActivity(
                 activity_id=f"act_{uuid4().hex[:8]}",
@@ -596,7 +405,7 @@ class DonorStewardshipChip(BaseSkillChip):
                 "approach": "relationship-based cultivation",
                 "key_messages": [
                     "Impact of their past support",
-                    "Alignment with their interests in education/youth",
+                    "[Their interests, from your records]",
                     "Opportunity for deeper engagement",
                 ],
                 "involvement_opportunities": [
@@ -609,7 +418,7 @@ class DonorStewardshipChip(BaseSkillChip):
                 {
                     "activity_id": a.activity_id,
                     "type": a.activity_type,
-                    "scheduled_date": a.scheduled_date.isoformat(),
+                    "suggested_date": a.scheduled_date.isoformat(),
                     "notes": a.notes,
                     "completed": a.completed,
                 }
@@ -621,20 +430,17 @@ class DonorStewardshipChip(BaseSkillChip):
                 {"milestone": "In-person visit", "target_date": (now + timedelta(days=60)).isoformat()},
                 {"milestone": "Solicitation meeting", "target_date": (now + timedelta(days=150)).isoformat()},
             ],
-            "assigned_to": "Development Director",
-            "backup_contact": "ED",
+            "suggested_owner": "Development Director",
+            "saved": False,
         }
 
         return SkillResponse(
-            content=f"Created {timeline_months}-month cultivation plan targeting ${target_amount:,.0f} "
-                    f"{goal.replace('_', ' ')}. Plan includes {len(activities)} touchpoints.",
+            content=(f"Draft {timeline_months}-month cultivation plan toward a ${target_amount:,.0f} "
+                     f"{goal.replace('_', ' ')}, with {len(activities)} suggested touchpoints. "
+                     f"{not_connected('A calendar', 'nothing has been saved or scheduled')}"),
             success=True,
             data={"cultivation_plan": cultivation_plan},
-            suggestions=[
-                "Would you like to adjust the timeline?",
-                "Should I add these activities to the calendar?",
-                "Want to add more personalized touches?",
-            ],
+            suggestions=["Would you like to adjust the timeline?"],
         )
 
     async def _generate_stewardship_report(
@@ -652,95 +458,9 @@ class DonorStewardshipChip(BaseSkillChip):
         period = request.entities.get("period", "quarterly")
         donor_segment = request.entities.get("segment", "all")
 
-        report = {
-            "report_id": f"stw_{uuid4().hex[:8]}",
-            "report_type": report_type,
-            "period": period,
-            "segment": donor_segment,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "summary": {
-                "total_donors": 245,
-                "new_donors": 32,
-                "retained_donors": 178,
-                "lapsed_donors": 15,
-                "upgraded_donors": 24,
-                "retention_rate": "87.5%",
-            },
-            "acknowledgments": {
-                "total_sent": 312,
-                "average_response_time": "2.3 days",
-                "personalized_letters": 45,
-                "calls_made": 28,
-                "on_time_percentage": "96%",
-            },
-            "cultivation_activities": {
-                "calls_completed": 85,
-                "meetings_held": 23,
-                "tours_given": 12,
-                "events_hosted": 3,
-                "total_touchpoints": 123,
-            },
-            "giving_metrics": {
-                "total_raised": 287500,
-                "average_gift": 1173.47,
-                "median_gift": 250,
-                "largest_gift": 25000,
-                "recurring_donors": 45,
-                "recurring_revenue_monthly": 4250,
-            },
-            "segment_performance": [
-                {
-                    "segment": "Champions ($10,000+)",
-                    "count": 8,
-                    "total_giving": 125000,
-                    "retention": "100%",
-                },
-                {
-                    "segment": "Benefactors ($5,000-$9,999)",
-                    "count": 12,
-                    "total_giving": 72000,
-                    "retention": "92%",
-                },
-                {
-                    "segment": "Patrons ($1,000-$4,999)",
-                    "count": 35,
-                    "total_giving": 56000,
-                    "retention": "89%",
-                },
-                {
-                    "segment": "Supporters ($250-$999)",
-                    "count": 78,
-                    "total_giving": 28500,
-                    "retention": "85%",
-                },
-                {
-                    "segment": "Friends (under $250)",
-                    "count": 112,
-                    "total_giving": 6000,
-                    "retention": "78%",
-                },
-            ],
-            "highlights": [
-                "Achieved highest retention rate in 3 years",
-                "24 donors upgraded to higher giving levels",
-                "New monthly giving program launched with 45 participants",
-            ],
-            "action_items": [
-                "Follow up with 15 lapsed donors from last year",
-                "Schedule year-end solicitation calls with top 20 prospects",
-                "Plan donor appreciation event for Q4",
-            ],
-        }
-
         return SkillResponse(
-            content=f"Generated {period} stewardship report for {donor_segment} donors. "
-                    f"Retention rate: {report['summary']['retention_rate']}. "
-                    f"Total raised: ${report['giving_metrics']['total_raised']:,.2f}.",
+            content=self.NO_CRM.format(f"I have no donors or gifts to report on for the {period} {report_type}"),
             success=True,
-            data={"stewardship_report": report},
-            suggestions=[
-                "Would you like to drill into a specific segment?",
-                "Should I create action plans for lapsed donors?",
-                "Want to compare with previous periods?",
-            ],
+            data={"stewardship_report": None, "connected": False},
+            suggestions=[],
         )
