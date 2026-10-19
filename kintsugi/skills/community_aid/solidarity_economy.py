@@ -156,6 +156,23 @@ class SolidarityEconomyChip(BaseSkillChip):
         SkillCapability.FINANCIAL_OPERATIONS,
     ]
     consensus_actions = ["approve_coop_formation", "time_bank_withdrawal", "cdfi_loan_application"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"time_bank": "time_bank_withdrawal"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"time_bank_withdrawal": "FINANCIAL"}
+    consensus_when = {
+        "time_bank": lambda r: r.entities.get("action") == "exchange" and (r.entities.get("hours") or 0) > 5,
+    }
+    consensus_unreachable = {
+        "approve_coop_formation": (
+            "advisory: coop_start returns a formation plan; its flag says this needs approval, and no intent "
+            "performs it"
+        ),
+        "cdfi_loan_application": (
+            "advisory: cdfi_loan returns a search of loans; its flag says this needs approval, and no intent "
+            "performs it"
+        ),
+    }
     required_spans = ["coop_registry", "time_bank_ledger", "cdfi_network", "worker_owner_tools"]
 
     # Time bank exchange rates (all services valued equally at 1 hour = 1 credit)

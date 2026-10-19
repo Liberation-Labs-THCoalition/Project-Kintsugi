@@ -405,11 +405,14 @@ kintsugi/
    - Each span: connection management, auth, error handling, rate limiting
 
 3. **Consensus Gate** (`governance/consensus.py`):
-   - Action queue (database-backed)
+   - Action queue, kept in a locked file (`CONSENT_FILE`), bound to its org and its requester
    - Category routing (financial, PII, external comms, self-modification)
-   - Approval threshold config (per category: 2/3, single, auto)
-   - Timeout handling (escalation after N hours)
-   - API endpoints: list pending, approve, reject
+   - Approval threshold config (per category: 2 or 1 distinct approvers; no auto-approve)
+   - Timeout handling: an item past its timeout is expired when anyone looks, so a late approval is refused
+   - API endpoints (`/api/v1/consensus`): list pending, approve (admin, not the asker), reject (admin, or the asker
+     withdrawing); an approval that completes an item runs it once
+   - What's held: each chip's `consensus_intents` (intent → action, with `consensus_when` for intents that ask only
+     sometimes); a declared action no intent performs is listed in `consensus_unreachable` with the reason
 
 4. **OTel Integration** (`governance/otel.py`):
    - OpenTelemetry SDK setup
@@ -836,7 +839,8 @@ volumes:
 - [x] CMA full pipeline: Stage 1 → 2 (consolidation) → 3 (retrieval) returns relevant memories
 - [x] MCP Tool Spans connect to at least Slack + one CRM
 - [x] OTel traces visible in configured backend
-- [x] Consensus Gate: submit action → approve in Dashboard → action executes
+- [x] Consensus Gate: a mapped intent is held before the chip runs → an admin of the org approves through `/api/v1/consensus` (not the asker) → the action runs once (2026-10-18; before then nothing consumed it)
+- [ ] Consensus Gate in the Dashboard: no approval view yet; approve through the API
 - [x] Setup Wizard: new org goes from zero to first agent interaction
 - [x] BDI Editor: create/edit/view beliefs, desires, intentions with revision history
 - [x] Test coverage >80% overall, E2E tests pass

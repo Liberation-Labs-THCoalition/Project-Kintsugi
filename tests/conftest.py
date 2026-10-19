@@ -1,5 +1,5 @@
-"""Shared fixtures (step 3): every test gets its own API-key store and audit log, never ~/.kintsugi, with auth on;
-`make_headers` mints a key there and returns the Authorization header for it."""
+"""Shared fixtures (step 3): every test gets its own API-key store, audit log and consent file, never ~/.kintsugi,
+with auth on; `make_headers` mints a key there and returns the Authorization header for it."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from kintsugi.security.api_keys import get_key_store
 def _isolated_auth_files(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "API_KEYS_FILE", str(tmp_path / "api_keys.json"))
     monkeypatch.setattr(settings, "AUDIT_LOG_FILE", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setattr(settings, "CONSENT_FILE", str(tmp_path / "consent.json"))
     monkeypatch.setattr(settings, "KINTSUGI_AUTH_DISABLED", False)
 
 

@@ -1365,10 +1365,19 @@ class TestRapidResponseChip:
             },
         )
         response = await rapid_response_chip.handle(request, context)
-        assert response.success
-        assert "alert_id" in response.data
-        # Should require consensus for rapid response activation
-        assert response.requires_consensus
+        # Held for consent before anything is sent (Vera's re-check, 2026-10-18: it used to alert, then flag)
+        assert response.success and response.requires_consensus and response.metadata.get("held")
+        assert response.consensus_action == "activate_rapid_response" and "consent_id" in response.data
+        # Once approved, it runs: the alert is created
+        from kintsugi.governance import consumer
+        from kintsugi.governance.consensus import get_consensus_gate
+        get_consensus_gate().approve(response.data["consent_id"], "key:k-admin", org_id=context.org_id)
+
+        class _One:
+            def get(self, name):
+                return rapid_response_chip
+        result = await consumer.execute_approved(response.data["consent_id"], context.org_id, _One())
+        assert result["success"] and "alert_id" in result["data"]
 
     @pytest.mark.asyncio
     async def test_privacy_security_in_response(

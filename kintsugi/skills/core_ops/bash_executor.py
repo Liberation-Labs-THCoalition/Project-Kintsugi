@@ -76,6 +76,15 @@ class BashSkillChip(BaseSkillChip):
     description = "Execute shell commands in the companion's workspace"
     version = "1.0.0"
     capabilities = [SkillCapability.EXECUTE_SHELL, SkillCapability.WRITE_DATA]
+    consensus_actions = ["shell_execute"]  # raised by its approval tier (Vera, 2026-10-18)
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "shell_execute": (
+            "shell-capable chips are refused on every path (the API guard, the agent path and an approved "
+            "replay); re-enabling shell is its own decision"
+        ),
+    }
     efe_weights = EFEWeights()
 
     def __init__(self, workspace_dir: str = None, timeout: int = DEFAULT_TIMEOUT):

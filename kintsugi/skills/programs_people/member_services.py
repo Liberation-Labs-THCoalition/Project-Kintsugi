@@ -115,6 +115,20 @@ class MemberServicesChip(BaseSkillChip):
     ]
 
     consensus_actions = ["change_membership_tier", "process_refund", "bulk_communication"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    # A renewal charges the fee of whatever tier it names, without checking the member's current tier, so every renewal
+    # can change the tier and charge for it (Vera, 10-18, item 4): held.
+    consensus_intents = {"member_communicate": "bulk_communication", "membership_renew": "change_membership_tier"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"bulk_communication": "EXTERNAL_COMMS", "change_membership_tier": "FINANCIAL"}
+    consensus_when = {
+        "member_communicate": lambda r: bool(r.entities.get("bulk", False)),
+        # an unknown tier gets the chip's own refusal at once, not a wait for two approvers
+        "membership_renew": lambda r: r.entities.get("tier", "basic") in MemberServicesChip._tiers,
+    }
+    consensus_unreachable = {
+        "process_refund": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = ["membership_db", "payment_processor", "email_service"]
 

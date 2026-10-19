@@ -29,7 +29,8 @@ from kintsugi.oracle.hooks import AgentTurn
 from kintsugi.oracle.monitor import OracleLoopMonitor, get_oracle_monitor
 from kintsugi.security.monitor import SecurityMonitor, Verdict
 from kintsugi.security.pii import PIIRedactor
-from kintsugi.skills.base import RESERVED_PARAMETERS, SkillContext, SkillRequest, is_shell_capable
+from kintsugi.skills.base import (RESERVED_PARAMETERS, SkillContext, SkillRequest, failure_reference,
+                                  is_shell_capable)
 from kintsugi.skills.registry import SkillRegistry, get_registry
 
 logger = logging.getLogger(__name__)
@@ -314,14 +315,14 @@ class AgentInstance:
             )
             return response.content, chip.name, (bool(response.requires_consensus), response.consensus_action)
         except Exception as exc:
-            logger.exception("skill %s failed", chip.name)
+            ref = failure_reference(logger, f"skill {chip.name}")
             self._events.publish(
                 "skill.failed",
-                {"skill": chip.name, "error": str(exc)},
+                {"skill": chip.name, "error_type": type(exc).__name__, "error_id": ref},
                 agent_id=self.id,
                 session_id=session_id,
             )
-            return f"Skill '{chip.name}' failed: {exc}", chip.name, no_consensus
+            return f"Skill '{chip.name}' couldn't complete this request (error {ref}).", chip.name, no_consensus
 
     @staticmethod
     def _choose_intent(chip: Any, message: str, domain: str) -> str:

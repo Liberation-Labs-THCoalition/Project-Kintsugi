@@ -42,6 +42,7 @@ from kintsugi.skills import (
     SkillResponse,
     register_chip,
 )
+from kintsugi.skills.base import consent_given
 
 
 class VolunteerStatus(str, Enum):
@@ -189,6 +190,17 @@ class VolunteerCoordinatorChip(BaseSkillChip):
     ]
 
     consensus_actions = ["mass_notification", "schedule_change_all"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"volunteer_notify": "mass_notification"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"mass_notification": "EXTERNAL_COMMS"}
+    consensus_when = {
+        "volunteer_notify": (lambda r: r.entities.get("volunteer_ids", []) == "all"
+            or len(r.entities.get("volunteer_ids", [])) > 10),
+    }
+    consensus_unreachable = {
+        "schedule_change_all": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["twilio_sms", "calendar_api", "geocoding"]
 
     SUPPORTED_INTENTS = {
@@ -389,7 +401,7 @@ class VolunteerCoordinatorChip(BaseSkillChip):
 
         # Check if this is a mass notification requiring consensus
         is_mass = volunteer_ids == "all" or len(volunteer_ids) > 10
-        if is_mass:
+        if is_mass and not consent_given(context):
             return SkillResponse(
                 content="Mass notification requires approval. Please confirm to proceed.",
                 success=True,

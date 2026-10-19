@@ -12,7 +12,7 @@ from kintsugi.api.auth import Principal, audit, require_admin, require_principal
 from kintsugi.plugins.loader import PluginLoader, PluginLoadError
 from kintsugi.plugins.registry import PluginRegistry
 from kintsugi.api.guards import refuse_shell_capable
-from kintsugi.skills.base import RESERVED_PARAMETERS, SkillContext, SkillRequest
+from kintsugi.skills.base import RESERVED_PARAMETERS, SkillContext, SkillRequest, failure_reference
 from kintsugi.skills.registry import get_registry
 
 logger = logging.getLogger(__name__)
@@ -147,9 +147,9 @@ async def execute_skill(skill_name: str, body: ExecuteSkillRequest,
     )
     try:
         response = await chip.handle(request, context)
-    except Exception as exc:
-        logger.exception("direct execution of %s failed", skill_name)
-        raise HTTPException(status_code=500, detail=f"skill execution failed: {exc}")
+    except Exception:
+        ref = failure_reference(logger, f"direct execution of {skill_name}")
+        raise HTTPException(status_code=500, detail=f"the skill couldn't complete this request (error {ref})")
     return {
         "skill": chip.name,
         "success": response.success,

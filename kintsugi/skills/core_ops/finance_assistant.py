@@ -248,6 +248,18 @@ class FinanceAssistantChip(BaseSkillChip):
     ]
 
     consensus_actions = ["approve_expense", "transfer_funds", "create_invoice", "modify_budget"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"invoice_create": "create_invoice"}
+    consensus_when = {
+        # an incomplete request gets the chip's own "missing fields" answer at once, not a wait for approval
+        "invoice_create": lambda r: bool(r.entities.get("client_name")) and bool(r.entities.get("amount")),
+    }
+    consensus_categories = {"create_invoice": "FINANCIAL"}
+    consensus_unreachable = {
+        "approve_expense": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "transfer_funds": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "modify_budget": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["quickbooks_api", "xero_api", "wave_api", "plaid_api"]
 
     # Expense approval threshold

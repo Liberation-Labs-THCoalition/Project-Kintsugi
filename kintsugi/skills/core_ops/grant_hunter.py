@@ -136,6 +136,12 @@ class GrantHunterChip(BaseSkillChip):
     ]
 
     consensus_actions = ["submit_application", "commit_match_funds"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "submit_application": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "commit_match_funds": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["grants_gov_api", "candid_api", "foundation_directory"]
 
     # Intent routing map

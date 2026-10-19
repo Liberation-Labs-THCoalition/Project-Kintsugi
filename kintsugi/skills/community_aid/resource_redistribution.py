@@ -44,6 +44,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import consent_given
 from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
@@ -191,6 +192,19 @@ class ResourceRedistributionChip(BaseSkillChip):
     ]
 
     consensus_actions = ["approve_large_redistribution", "partner_agreement"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"partner_connect": "partner_agreement"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"partner_agreement": "GENERAL"}
+    consensus_when = {
+        "partner_connect": lambda r: (r.entities.get("action", "list") == "add"
+                                      and bool(r.entities.get("is_mou", False))),
+    }
+    consensus_unreachable = {
+        "approve_large_redistribution": (
+            "no intent performs this yet: declared for a future one, so it can't happen ungated"
+        ),
+    }
 
     required_spans = [
         "inventory_system",
@@ -446,7 +460,7 @@ class ResourceRedistributionChip(BaseSkillChip):
             )
 
             # Large partnerships require consensus
-            if request.entities.get("is_mou", False):
+            if request.entities.get("is_mou", False) and not consent_given(context):
                 return SkillResponse(
                     content=f"Partner {partner.name} registration requires approval.",
                     success=True,

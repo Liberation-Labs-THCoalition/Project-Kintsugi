@@ -102,3 +102,61 @@ def test_both_paths_share_one_list_of_server_only_parameters_and_one_shell_test(
     from kintsugi.api.routes import skills as route
     assert route.RESERVED_PARAMETERS is RESERVED_PARAMETERS and "approved" in RESERVED_PARAMETERS
     assert "is_shell_capable(" in inspect.getsource(guards.refuse_shell_capable)
+
+
+# ---- a failure never hands the caller the exception's text (Vera, 2026-10-18) ------------------------------------------
+
+class _Boom:
+    name = "boom"
+    capabilities = []
+
+    async def handle(self, request, context):
+        raise RuntimeError("SECRET /srv/kintsugi/db.sqlite row 4471 SELECT * FROM members")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_skill_on_the_agent_path_names_an_error_id_not_the_exception(caplog):
+    events = []
+    agent = _agent(_Boom())
+    agent._events.publish = lambda name, data, **kw: events.append((name, data))
+    result = await agent.handle_message("hello", user_id="key:k1")
+    assert "SECRET" not in result.response and "error " in result.response
+    failed = [d for n, d in events if n == "skill.failed"]
+    assert failed and "SECRET" not in str(failed) and failed[0]["error_type"] == "RuntimeError"
+    ref = failed[0]["error_id"]
+    assert ref in result.response and any(ref in r.getMessage() and r.exc_info for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_direct_execution_names_an_error_id_not_the_exception(monkeypatch):
+    from fastapi import HTTPException
+    from kintsugi.api.auth import Principal
+    from kintsugi.api.routes import skills as route
+
+    class Registry:
+        def get(self, name):
+            return _Boom()
+    monkeypatch.setattr(route, "get_registry", lambda: Registry())
+    monkeypatch.setattr(route, "refuse_shell_capable", lambda *a, **k: None)
+    with pytest.raises(HTTPException) as err:
+        await route.execute_skill("boom", route.ExecuteSkillRequest(raw_input="hi"),
+                                  principal=Principal(org_id="org_a", key_id="k1", role="member"))
+    assert err.value.status_code == 500 and "SECRET" not in err.value.detail and "error " in err.value.detail
+
+
+@pytest.mark.asyncio
+async def test_an_oracle_hook_that_raises_gives_callers_an_error_id_not_the_exception():
+    from kintsugi.oracle.hooks import AgentTurn
+    from kintsugi.oracle.monitor import OracleLoopMonitor
+
+    class Raises:
+        name = "raises"
+
+        async def review(self, turn):
+            raise RuntimeError("SECRET internal path /srv/oracle/keys")
+    monitor = OracleLoopMonitor(mode="observe")
+    monitor.register_hook(Raises())
+    review = await monitor.review(AgentTurn(agent_id="a", session_id=None, user_input="hi", response="hello",
+                                            skill_used=None, metadata={}))
+    dumped = str(review.verdict.to_dict())
+    assert "SECRET" not in dumped and "error_id" in dumped

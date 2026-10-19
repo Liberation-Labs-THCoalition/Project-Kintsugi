@@ -34,6 +34,7 @@ from kintsugi.skills import (
     SkillRequest,
     SkillResponse,
 )
+from kintsugi.skills.base import consent_given
 
 
 @dataclass
@@ -119,6 +120,14 @@ class StaffOnboardingChip(BaseSkillChip):
     ]
 
     consensus_actions = ["complete_onboarding", "grant_system_access", "update_employee_record"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"onboard_complete": "complete_onboarding"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"complete_onboarding": "GENERAL"}
+    consensus_unreachable = {
+        "grant_system_access": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "update_employee_record": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = ["hris_api", "training_lms", "document_store"]
 
@@ -831,7 +840,7 @@ class StaffOnboardingChip(BaseSkillChip):
             ],
         }
 
-        requires_approval = self.requires_consensus("complete_onboarding")
+        requires_approval = self.requires_consensus("complete_onboarding") and not consent_given(context)
 
         return SkillResponse(
             content=f"Onboarding completed for employee {employee_id}. "

@@ -44,6 +44,7 @@ from kintsugi.skills import (
     SkillRequest,
     SkillResponse,
 )
+from kintsugi.skills.base import consent_given
 
 
 class AlertType(str, Enum):
@@ -165,6 +166,16 @@ class RapidResponseChip(BaseSkillChip):
         SkillCapability.PII_ACCESS,
     ]
     consensus_actions = ["activate_rapid_response", "release_bail_funds", "share_location_alert"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"raid_alert": "activate_rapid_response", "bail_request": "release_bail_funds"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"activate_rapid_response": "EXTERNAL_COMMS", "release_bail_funds": "FINANCIAL"}
+    consensus_unreachable = {
+        "share_location_alert": (
+            "advisory: safe_location returns general areas and a hotline, never addresses; its flag says this "
+            "needs approval, and no intent performs it"
+        ),
+    }
     required_spans = ["alert_network", "bail_fund", "legal_hotline", "safe_location_db"]
 
     # Security notice included in relevant responses
@@ -252,8 +263,8 @@ class RapidResponseChip(BaseSkillChip):
                 "responders_notified": alert.responders_notified,
                 "status": "active",
             },
-            requires_consensus=True,
-            consensus_action="activate_rapid_response",
+            requires_consensus=not consent_given(context),       # the approved run carries it out
+            consensus_action=None if consent_given(context) else "activate_rapid_response",
             suggestions=[
                 "Update alert status",
                 "Request additional responders",
@@ -355,8 +366,8 @@ class RapidResponseChip(BaseSkillChip):
             content=content,
             success=True,
             data=result,
-            requires_consensus=True,
-            consensus_action="release_bail_funds",
+            requires_consensus=not consent_given(context),       # the approved run carries it out
+            consensus_action=None if consent_given(context) else "release_bail_funds",
             suggestions=[
                 "Check request status",
                 "Contact bail fund directly",

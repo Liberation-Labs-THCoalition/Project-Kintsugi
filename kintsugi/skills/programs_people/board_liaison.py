@@ -116,6 +116,20 @@ class BoardLiaisonChip(BaseSkillChip):
     ]
 
     consensus_actions = ["distribute_materials", "record_resolution", "update_bylaws"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"resolution_track": "record_resolution"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"record_resolution": "GENERAL"}
+    consensus_when = {
+        "resolution_track": lambda r: r.entities.get("action") == "create",
+    }
+    consensus_unreachable = {
+        "distribute_materials": (
+            "advisory: meeting_prep returns a meeting packet; its flag says this needs approval, and no intent "
+            "performs it"
+        ),
+        "update_bylaws": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = ["document_templates", "calendar_api", "voting_system"]
 

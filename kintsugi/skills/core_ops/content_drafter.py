@@ -210,6 +210,12 @@ class ContentDrafterChip(BaseSkillChip):
     ]
 
     consensus_actions = ["publish_external", "send_mass_email"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "publish_external": "no intent publishes: every intent returns a draft",
+        "send_mass_email": "no intent sends: every intent returns a draft",
+    }
     required_spans = ["template_engine", "sb942_labeler", "social_media_api"]
 
     # SB 942 AI disclosure labels

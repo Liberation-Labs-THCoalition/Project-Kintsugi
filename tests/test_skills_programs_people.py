@@ -42,6 +42,21 @@ from kintsugi.skills.programs_people import (
 # Fixtures
 # ==============================================================================
 
+async def _approved(chip, response, context):
+    """Approve a held response and run it once, as the consensus routes do (Vera's re-check, 2026-10-18)."""
+    from kintsugi.governance import consumer
+    from kintsugi.governance.consensus import get_consensus_gate
+    assert response.metadata.get("held"), response.content
+    gate = get_consensus_gate()
+    if gate.approve(response.data["consent_id"], "key:k-admin", org_id=context.org_id).status.value == "PENDING":
+        gate.approve(response.data["consent_id"], "key:k-admin-2", org_id=context.org_id)   # FINANCIAL takes two
+
+    class _One:
+        def get(self, name):
+            return chip
+    return await consumer.execute_approved(response.data["consent_id"], context.org_id, _One())
+
+
 @pytest.fixture
 def context():
     """Standard test context."""
@@ -454,8 +469,9 @@ class TestStaffOnboardingChip:
             entities={"employee_id": "emp_001", "force_complete": True},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "completion_record" in response.data
+        result = await _approved(chip, response, context)       # completing onboarding is held until approved
+        assert result["success"]
+        assert "completion_record" in result["data"]
 
 
 # ==============================================================================
@@ -617,9 +633,10 @@ class TestMemberServicesChip:
             entities={"member_id": "mem_001", "tier": "gold"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "renewal" in response.data
-        assert response.data["renewal"]["tier"] == "gold"
+        result = await _approved(chip, response, context)       # a renewal charges for a tier: held, two approvers
+        assert result["success"]
+        assert "renewal" in result["data"]
+        assert result["data"]["renewal"]["tier"] == "gold"
 
     @pytest.mark.asyncio
     async def test_handle_benefits_info(self, chip, context):
@@ -915,8 +932,8 @@ class TestEdgeCases:
             entities={"employee_id": "emp_001", "force_complete": False},
         )
         response = await chip.handle(request, context)
-        # Response might fail due to incomplete items
-        assert "completion_status" in response.data or "completion_record" in response.data
+        result = await _approved(chip, response, context)       # held first; the chip's own check runs once approved
+        assert "completion_status" in result["data"] or "completion_record" in result["data"]
 
     @pytest.mark.asyncio
     async def test_board_liaison_resolution_filtering(self, context):

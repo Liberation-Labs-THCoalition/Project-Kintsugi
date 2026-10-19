@@ -189,6 +189,12 @@ class InstitutionalMemoryChip(BaseSkillChip):
     ]
 
     consensus_actions = ["archive_record", "delete_memory"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "archive_record": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "delete_memory": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["cma_query", "temporal_log", "embedding_search"]
 
     SUPPORTED_INTENTS = {

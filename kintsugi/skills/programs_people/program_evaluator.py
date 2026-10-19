@@ -114,6 +114,18 @@ class ProgramEvaluatorChip(BaseSkillChip):
     ]
 
     consensus_actions = ["finalize_evaluation", "publish_findings"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "finalize_evaluation": (
+            "advisory: evaluation_design returns a draft design; its flag says this needs approval, and no intent"
+            " performs it"
+        ),
+        "publish_findings": (
+            "advisory: findings_report returns draft findings; its flag says this needs approval, and no intent "
+            "performs it"
+        ),
+    }
 
     required_spans = ["logic_model_builder", "survey_tools", "data_viz"]
 

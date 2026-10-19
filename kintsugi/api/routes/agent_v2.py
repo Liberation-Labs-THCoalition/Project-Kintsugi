@@ -71,14 +71,9 @@ def _load_bdi_context() -> tuple[list, list]:
 
 
 def _trusted_metadata(body_context, principal: Principal) -> dict:
-    """The caller's context dict, with what the server decides written over it: the acting user is the key (chips
-    match records to user_id), and the role comes from the key, never the body, or a caller could send "role": "admin"
-    (Vera's re-check, 2026-10-18). Whatever user_id the body claimed is kept as claimed_user, for the log."""
-    meta = dict(body_context or {})
-    claimed = meta.pop("user_id", None)
-    meta["role"] = principal.role
-    meta["claimed_user"] = claimed
-    return meta
+    """Only allowlisted caller keys, plus what the server decides (kintsugi/api/metadata.py)."""
+    from kintsugi.api.metadata import trusted_metadata
+    return trusted_metadata(body_context, principal)
 
 
 @router.post("/message", response_model=AgentResponse)
