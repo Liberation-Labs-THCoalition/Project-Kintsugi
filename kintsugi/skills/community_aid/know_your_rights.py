@@ -174,13 +174,23 @@ class KnowYourRightsChip(BaseSkillChip):
         ("immigration_rights", re.compile(r"\bICE\b")),
         ("immigration_rights", re.compile(r"(?i)\b(immigration|immigrants?|deport\w*|la migra|undocumented|asylum|visas?|"
                                           r"green card)\b")),
-        ("immigration_rights", re.compile(r"(?i)\bice\b.{0,40}\b(door|raids?|agents?|officers?|detain\w*|outside|"
-                                          r"here|coming)\b")),
-        ("immigration_rights", re.compile(r"(?i)\bwarrant\b.{0,40}\bdoor\b|\bdoor\b.{0,40}\bwarrant\b")),
+        # Only words an agency fits: "outside", "here" and "coming" are weather words too (Vera, 10-19).
+        ("immigration_rights", re.compile(r"(?i)\bice\b.{0,40}\b(door|raids?|agents?|officers?|detain\w*)\b")),
+        # A warrant at the door with no agency named: the door rules differ, so ask (see WARRANT_UNCLEAR).
+        ("warrant_unclear", re.compile(r"(?i)\bwarrant\b.{0,40}\bdoor\b|\bdoor\b.{0,40}\bwarrant\b")),
         ("protest_rights", re.compile(r"(?i)\b(protests?|protesting|march(es|ing)|rall(y|ies)|demonstrat\w*|picket\w*)\b")),
         ("protest_rights", re.compile(r"\bmarch\b")),        # lowercase only: "in March" is the month
-        ("police_encounter", re.compile(r"(?i)\b(police|cops?|officers?|arrest\w*|pulled over|traffic stop|stopped me)\b")),
+        # Spanish too, beside "la migra" above: policía, me detuvo (Vera, 10-19).
+        ("police_encounter", re.compile(r"(?i)\b(police|cops?|officers?|sheriff\w*|deput(y|ies)|arrest\w*|pulled over|"
+                                        r"traffic stop|stopped me|polic[ií]a|me detuvo)\b")),
     ]
+    # Words that name the police as the agency (not "officers", which ICE agents are called too).
+    POLICE_NAMED = re.compile(r"(?i)\b(police|cops?|sheriff\w*|deput(y|ies)|polic[ií]a)\b")
+    WARRANT_UNCLEAR = (
+        "Is it ICE (immigration) or the police? The rules about your door are different. A search warrant signed by a "
+        "judge lets the police come in. An immigration form signed by an officer doesn't let ICE in without your "
+        "consent. Either way: you can stay silent, and you can ask them to slide the warrant under the door so you can "
+        "read who signed it.")
     TOPIC_CHOICES = ("I can give the rights that hold across the US for three situations: a police encounter, an "
                      "immigration encounter (ICE at your door included), or a protest. Which is it?")
 
@@ -192,8 +202,19 @@ class KnowYourRightsChip(BaseSkillChip):
         raw = getattr(request, "raw_input", "") or ""
         for topic, pattern in self.TOPIC_WORDS:
             if pattern.search(raw):
+                if topic == "warrant_unclear" and self.POLICE_NAMED.search(raw):
+                    return "police_encounter"          # the police are named: their warrant rules apply
                 return topic
         return default
+
+    def _warrant_unclear(self) -> SkillResponse:
+        """Never guess the agency at the door: a wrong guess is wrong advice at the one moment it counts."""
+        return SkillResponse(
+            content=f"{self.WARRANT_UNCLEAR}\n\n{self.LEGAL_DISCLAIMER}",
+            success=True,
+            data={"topic": "warrant_unclear", "rights_info": None, "choices": ["immigration_rights", "police_encounter"]},
+            suggestions=["My rights if ICE comes", "My rights in a police encounter"],
+        )
 
     def __init__(self, contacts: dict[str, str] | None = None) -> None:
         super().__init__()
@@ -263,6 +284,8 @@ class KnowYourRightsChip(BaseSkillChip):
         if language not in self.SUPPORTED_LANGUAGES:
             language = "en"
 
+        if topic == "warrant_unclear":
+            return self._warrant_unclear()
         if topic is None:
             # Nothing named and nothing recognised: offer the three, never a dead end.
             return SkillResponse(
@@ -577,6 +600,8 @@ class KnowYourRightsChip(BaseSkillChip):
             SkillResponse with rights card content
         """
         topic = self._topic(request, default="police_encounter")
+        if topic == "warrant_unclear":
+            return self._warrant_unclear()
         language = request.entities.get("language", "en")
         format_type = request.entities.get("format", "text")
 
