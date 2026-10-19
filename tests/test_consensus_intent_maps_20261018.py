@@ -81,6 +81,7 @@ ASKS = {
     ("ImpactAuditorChip", "impact_report"): {"report_type": "funder", "submit": True},
     ("KnowYourRightsChip", "legal_clinic"): {"action": "schedule"},
     ("MemberServicesChip", "member_communicate"): {"bulk": True},
+    ("MemberServicesChip", "membership_renew"): {"member_id": "m-1", "tier": "gold"},
     ("MutualAidCoordinatorChip", "match_request"): {"confirm_match_id": "m-1"},
     ("MutualAidEnhancedChip", "match_request"): {"need_id": "n-1", "offer_id": "o-1"},
     ("ResourceRedistributionChip", "partner_connect"): {"action": "add", "partner_name": "P", "is_mou": True},
@@ -123,9 +124,14 @@ async def test_each_mapped_intent_is_held_then_dispatched_once_approved(cls, int
         assert "nothing ran" not in result["content"], result
 
 
+# Where an empty request would ask (a renewal defaults to the basic tier), the request that doesn't.
+DOESNT_ASK = {("MemberServicesChip", "membership_renew"): {"member_id": "m-1", "tier": "no-such-tier"}}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("key", sorted(ASKS), ids=lambda k: f"{k[0]}-{k[1]}")
 async def test_a_conditional_intent_that_doesnt_ask_runs_as_before(key):
     cls = next(c for c in CHIPS if c.__name__ == key[0])
-    r = await cls().handle(SkillRequest(intent=key[1], raw_input="test"), SkillContext(org_id="org_maps", user_id="u"))
+    r = await cls().handle(SkillRequest(intent=key[1], raw_input="test", entities=dict(DOESNT_ASK.get(key, {}))),
+                           SkillContext(org_id="org_maps", user_id="u"))
     assert not r.metadata.get("held")

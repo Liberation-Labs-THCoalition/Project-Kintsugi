@@ -47,7 +47,9 @@ async def _approved(chip, response, context):
     from kintsugi.governance import consumer
     from kintsugi.governance.consensus import get_consensus_gate
     assert response.metadata.get("held"), response.content
-    get_consensus_gate().approve(response.data["consent_id"], "key:k-admin", org_id=context.org_id)
+    gate = get_consensus_gate()
+    if gate.approve(response.data["consent_id"], "key:k-admin", org_id=context.org_id).status.value == "PENDING":
+        gate.approve(response.data["consent_id"], "key:k-admin-2", org_id=context.org_id)   # FINANCIAL takes two
 
     class _One:
         def get(self, name):
@@ -631,9 +633,10 @@ class TestMemberServicesChip:
             entities={"member_id": "mem_001", "tier": "gold"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "renewal" in response.data
-        assert response.data["renewal"]["tier"] == "gold"
+        result = await _approved(chip, response, context)       # a renewal charges for a tier: held, two approvers
+        assert result["success"]
+        assert "renewal" in result["data"]
+        assert result["data"]["renewal"]["tier"] == "gold"
 
     @pytest.mark.asyncio
     async def test_handle_benefits_info(self, chip, context):

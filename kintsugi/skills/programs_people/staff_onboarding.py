@@ -122,6 +122,8 @@ class StaffOnboardingChip(BaseSkillChip):
     consensus_actions = ["complete_onboarding", "grant_system_access", "update_employee_record"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"onboard_complete": "complete_onboarding"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"complete_onboarding": "GENERAL"}
     consensus_unreachable = {
         "grant_system_access": "no intent performs this yet: declared for a future one, so it can't happen ungated",
         "update_employee_record": "no intent performs this yet: declared for a future one, so it can't happen ungated",

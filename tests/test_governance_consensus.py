@@ -153,12 +153,17 @@ class TestConsensusGateReject:
         result = gate.reject(item.id, "alice", org_id="org1")
         assert result.rationale is None
 
-    def test_reject_already_approved_raises(self):
+    def test_reject_withdraws_an_approved_item_that_hasnt_run_but_not_one_that_has(self):
+        # Vera's review, 2026-10-18, item 1: an approval stranded by a crash must not be stuck.
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
         gate.approve(item.id, "alice", org_id="org1")
+        assert gate.reject(item.id, "bob", org_id="org1").status == ConsentStatus.REJECTED
+        ran = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
+        gate.approve(ran.id, "alice", org_id="org1")
+        gate.claim(ran.id, org_id="org1")
         with pytest.raises(ValueError, match="terminal state"):
-            gate.reject(item.id, "bob", org_id="org1")
+            gate.reject(ran.id, "bob", org_id="org1")
 
     def test_reject_unknown_id_raises(self):
         gate = ConsensusGate()

@@ -168,6 +168,8 @@ class RapidResponseChip(BaseSkillChip):
     consensus_actions = ["activate_rapid_response", "release_bail_funds", "share_location_alert"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"raid_alert": "activate_rapid_response", "bail_request": "release_bail_funds"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"activate_rapid_response": "EXTERNAL_COMMS", "release_bail_funds": "FINANCIAL"}
     consensus_unreachable = {
         "share_location_alert": (
             "advisory: safe_location returns general areas and a hotline, never addresses; its flag says this "

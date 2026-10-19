@@ -192,6 +192,8 @@ class VolunteerCoordinatorChip(BaseSkillChip):
     consensus_actions = ["mass_notification", "schedule_change_all"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"volunteer_notify": "mass_notification"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"mass_notification": "EXTERNAL_COMMS"}
     consensus_when = {
         "volunteer_notify": (lambda r: r.entities.get("volunteer_ids", []) == "all"
             or len(r.entities.get("volunteer_ids", [])) > 10),

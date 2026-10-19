@@ -148,6 +148,8 @@ class FoodAccessChip(BaseSkillChip):
     consensus_actions = ["approve_food_distribution", "partner_food_share"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"food_donate": "approve_food_distribution"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"approve_food_distribution": "GENERAL"}
     consensus_when = {
         "food_donate": lambda r: (r.entities.get("quantity") or 0) > 100,
     }

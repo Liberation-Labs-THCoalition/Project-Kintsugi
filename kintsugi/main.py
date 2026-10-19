@@ -46,6 +46,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.KINTSUGI_AUTH_DISABLED:
         logger.warning("KINTSUGI_AUTH_DISABLED is set: every request not from loopback will be refused")
 
+    # Approvals a crash or restart left unrun: run them inside their window, expire the rest.
+    try:
+        from kintsugi.governance.consumer import sweep_approved
+
+        swept = await sweep_approved()
+        if swept["ran"] or swept["expired"]:
+            logger.warning("consent sweep at startup: ran %s, expired %s", swept["ran"], swept["expired"])
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("consent sweep failed: %s", type(exc).__name__)
+
     yield
 
     if app.state.db_available:

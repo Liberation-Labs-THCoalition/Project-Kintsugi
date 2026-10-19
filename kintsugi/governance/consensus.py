@@ -125,6 +125,9 @@ class ConsensusConfig:
     })
     default_timeout_hours: float = 24.0
     escalation_after_hours: float = 48.0
+    # An approved item normally runs at once. If it didn't (a crash or restart in between), it may still run within
+    # this window, by the startup sweep or the retry route; after it, it expires and has to be asked for again.
+    approved_run_window_hours: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -224,11 +227,13 @@ class ConsensusGate:
             return item
 
     def reject(self, item_id: str, rejector: str, rationale: str = "", *, org_id: str) -> ConsentItem:
-        """Reject the item immediately. The requester may withdraw their own."""
+        """Reject the item immediately. The requester may withdraw their own. An approved item that hasn't run yet can
+        still be rejected, so an approval stranded by a crash is never stuck (Vera's review, 2026-10-18, item 1)."""
         with self._txn():
             item = self._get_or_raise(item_id, org_id)
             self._expire_if_due(item)
-            self._assert_actionable(item, "reject")
+            if item.status != ConsentStatus.APPROVED:
+                self._assert_actionable(item, "reject")
 
             item.status = ConsentStatus.REJECTED
             item.resolved_at = datetime.now(timezone.utc)
@@ -237,16 +242,31 @@ class ConsensusGate:
             return item
 
     def claim(self, item_id: str, *, org_id: str) -> ConsentItem:
-        """Take an APPROVED item to run it: it becomes EXECUTED now, before it runs, so it can never run twice."""
+        """Take an APPROVED item to run it: it becomes EXECUTED now, before it runs, so it can never run twice. An
+        approval older than the run window expires here instead of running late."""
+        stale = None
         with self._txn():
             item = self._get_or_raise(item_id, org_id)
             if item.status != ConsentStatus.APPROVED:
                 raise ValueError(f"item {item_id} is {item.status.value}, not approved; it can't run")
             if item.payload_digest != payload_digest(item.action_payload):
                 raise ValueError(f"item {item_id} was changed after it was asked for; it can't run")
-            item.status = ConsentStatus.EXECUTED
-            item.executed_at = datetime.now(timezone.utc)
-            return item
+            now = datetime.now(timezone.utc)
+            window = self._config.approved_run_window_hours
+            if item.resolved_at and (now - item.resolved_at).total_seconds() / 3600.0 > window:
+                item.status = ConsentStatus.EXPIRED          # written when the transaction closes, then refused
+                item.rationale = f"approved, but not run within {window:g} hour(s); ask again"
+                stale = item
+            else:
+                item.status = ConsentStatus.EXECUTED
+                item.executed_at = now
+                return item
+        raise ValueError(f"item {item_id} {stale.rationale}")
+
+    def approved_items(self) -> list[ConsentItem]:
+        """Every APPROVED item that hasn't run, in any org: for the startup sweep only, never a route."""
+        with self._txn(write=False):
+            return [i for i in self._items.values() if i.status == ConsentStatus.APPROVED]
 
     def record_result(self, item_id: str, result: dict, *, org_id: str) -> ConsentItem:
         with self._txn():

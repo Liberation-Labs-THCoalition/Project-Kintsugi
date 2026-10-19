@@ -194,6 +194,8 @@ class ResourceRedistributionChip(BaseSkillChip):
     consensus_actions = ["approve_large_redistribution", "partner_agreement"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"partner_connect": "partner_agreement"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"partner_agreement": "GENERAL"}
     consensus_when = {
         "partner_connect": lambda r: (r.entities.get("action", "list") == "add"
                                       and bool(r.entities.get("is_mou", False))),

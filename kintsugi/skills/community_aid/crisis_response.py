@@ -204,6 +204,8 @@ class CrisisResponseChip(BaseSkillChip):
     consensus_actions = ["activate_emergency_protocol", "release_emergency_funds"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"crisis_alert": "activate_emergency_protocol"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"activate_emergency_protocol": "EXTERNAL_COMMS"}
     consensus_when = {
         "crisis_alert": lambda r: r.entities.get("severity") == "critical",
     }

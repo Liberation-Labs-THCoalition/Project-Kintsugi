@@ -221,6 +221,8 @@ class CoalitionBuilderChip(BaseSkillChip):
     consensus_actions = ["sign_mou", "joint_statement", "shared_campaign_launch"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"campaign_coordinate": "shared_campaign_launch"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"shared_campaign_launch": "EXTERNAL_COMMS"}
     consensus_when = {
         "campaign_coordinate": lambda r: bool(r.entities.get("is_launch", False)),
     }

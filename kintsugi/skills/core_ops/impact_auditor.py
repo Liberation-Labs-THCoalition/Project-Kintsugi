@@ -196,6 +196,8 @@ class ImpactAuditorChip(BaseSkillChip):
     consensus_actions = ["publish_report", "submit_to_funder"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"impact_report": "submit_to_funder"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"submit_to_funder": "EXTERNAL_COMMS"}
     consensus_when = {
         "impact_report": lambda r: r.entities.get("report_type") == "funder" and bool(r.entities.get("submit")),
     }

@@ -37,6 +37,11 @@ _live: set = set()
 _lock = threading.Lock()
 
 
+def is_token(value) -> bool:
+    """Whether a value is a token this module minted (a caller's JSON can never be one)."""
+    return isinstance(value, _Token)
+
+
 def request_payload(chip_name: str, request, context, action: str) -> dict:
     """Everything needed to run the request later, and exactly what an approval is for."""
     return {
@@ -84,6 +89,20 @@ def redeem(token, chip_name: str, request, context, action: str) -> bool:
         _live.discard(token)
     return (token.org_id == context.org_id and token.action == action
             and token.digest == payload_digest(request_payload(chip_name, request, context, action)))
+
+
+async def sweep_approved(registry=None) -> dict:
+    """Run every approval a crash or restart left unrun, or expire it if it's older than the run window (Vera's
+    review, 2026-10-18, item 1). Called when the server starts. Returns {"ran": [...], "expired": [...]}."""
+    out = {"ran": [], "expired": []}
+    for item in get_consensus_gate().approved_items():
+        try:
+            await execute_approved(item.id, item.org_id, registry)
+            out["ran"].append(item.id)
+        except ValueError as exc:
+            logger.warning("approved %s not run: %s", item.id, exc)
+            out["expired"].append(item.id)
+    return out
 
 
 async def execute_approved(item_id: str, org_id: str, registry=None) -> dict:

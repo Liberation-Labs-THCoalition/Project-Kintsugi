@@ -220,6 +220,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
     consensus_actions = ["approve_high_value_request", "share_requester_info"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"match_request": "share_requester_info"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"share_requester_info": "PII"}
     consensus_when = {
         "match_request": lambda r: bool(r.entities.get("confirm_match_id")),
     }

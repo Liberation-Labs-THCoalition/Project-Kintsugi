@@ -202,6 +202,8 @@ class CommunityAssetMapperChip(BaseSkillChip):
     consensus_actions = ["publish_asset_map", "share_with_partner"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"asset_map": "publish_asset_map"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"publish_asset_map": "EXTERNAL_COMMS"}
     consensus_when = {
         "asset_map": lambda r: bool(r.entities.get("share_publicly", False)),
     }

@@ -118,6 +118,8 @@ class BoardLiaisonChip(BaseSkillChip):
     consensus_actions = ["distribute_materials", "record_resolution", "update_bylaws"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"resolution_track": "record_resolution"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"record_resolution": "GENERAL"}
     consensus_when = {
         "resolution_track": lambda r: r.entities.get("action") == "create",
     }

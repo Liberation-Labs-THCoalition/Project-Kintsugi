@@ -158,6 +158,8 @@ class SolidarityEconomyChip(BaseSkillChip):
     consensus_actions = ["approve_coop_formation", "time_bank_withdrawal", "cdfi_loan_application"]
     # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
     consensus_intents = {"time_bank": "time_bank_withdrawal"}
+    # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
+    consensus_categories = {"time_bank_withdrawal": "FINANCIAL"}
     consensus_when = {
         "time_bank": lambda r: r.entities.get("action") == "exchange" and (r.entities.get("hours") or 0) > 5,
     }

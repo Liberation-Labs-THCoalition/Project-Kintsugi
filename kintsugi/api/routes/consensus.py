@@ -42,16 +42,37 @@ async def approve(item_id: str, body: Decision, principal: Principal = Depends(r
     if not principal.is_admin:
         raise HTTPException(status_code=403, detail="approving an action needs an admin key")
     gate = get_consensus_gate()
+    if gate.get_item(item_id, org_id=principal.org_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown consent item {item_id!r}")
+    # The audit record is written before the approval is committed: if it can't be written, nothing is approved, so
+    # an approval can't exist without its record (Vera's review, 2026-10-18, item 1).
+    audit(principal, "consensus.approve", item=item_id)
     try:
         item = gate.approve(item_id, _who(principal), body.rationale, org_id=principal.org_id)
     except ValueError as exc:
         raise HTTPException(status_code=404 if "No consent item" in str(exc) else 409, detail=str(exc))
-    audit(principal, "consensus.approve", item=item_id, status=item.status.value)
     out = {"item": item.to_dict(), "result": None}
     if item.status == ConsentStatus.APPROVED:
         out["result"] = await execute_approved(item_id, principal.org_id)
         out["item"] = gate.get_item(item_id, org_id=principal.org_id).to_dict()
     return out
+
+
+@router.post("/{item_id}/run")
+async def run(item_id: str, principal: Principal = Depends(require_principal)) -> dict:
+    """Run an approved item that didn't run (a crash or restart between approval and running). Within the run window
+    it runs once; after it, it expires and has to be asked for again."""
+    if not principal.is_admin:
+        raise HTTPException(status_code=403, detail="running an approved action needs an admin key")
+    gate = get_consensus_gate()
+    if gate.get_item(item_id, org_id=principal.org_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown consent item {item_id!r}")
+    audit(principal, "consensus.run", item=item_id)
+    try:
+        result = await execute_approved(item_id, principal.org_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"item": gate.get_item(item_id, org_id=principal.org_id).to_dict(), "result": result}
 
 
 @router.post("/{item_id}/reject")

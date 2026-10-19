@@ -280,14 +280,17 @@ class SkillCapability(str, Enum):
 RESERVED_PARAMETERS = frozenset({"approved"})
 
 
-# Set on the context by BaseSkillChip's wrapper, and only there, once the approved replay's token is redeemed.
+# Set on the context by BaseSkillChip's wrapper, and only there, once the approved replay's token is redeemed. Its
+# value is the token object itself, which only the consumer can mint and no JSON from a caller can be: a caller's
+# `"_consent_redeemed": true` is just a bool (Vera's review of the consumer, 2026-10-18, item 3).
 CONSENT_REDEEMED = "_consent_redeemed"
 
 
 def consent_given(context) -> bool:
     """Whether this call is the approved run of a held action. A handler that used to flag its act (or act, then
     flag) checks this, so an approved run carries the act out instead of asking again."""
-    return (getattr(context, "metadata", None) or {}).get(CONSENT_REDEEMED) is True
+    from kintsugi.governance.consumer import is_token
+    return is_token((getattr(context, "metadata", None) or {}).get(CONSENT_REDEEMED))
 
 
 def failure_reference(log, what: str) -> str:
@@ -564,10 +567,15 @@ class BaseSkillChip(ABC):
                 action = (type(self).consensus_intents or {}).get(intent)
                 if action and _asks_for(type(self), intent, request):
                     from kintsugi.governance import consumer
-                    token = (getattr(context, "metadata", None) or {}).get(consumer.CONSENT_TOKEN)
-                    if not consumer.redeem(token, self.name, request, context, action):
-                        return consumer.hold(self, request, context, action)
-                    context.metadata[CONSENT_REDEEMED] = True
+                    md = getattr(context, "metadata", None) or {}
+                    done = md.get(CONSENT_REDEEMED)
+                    # An outer wrapper of this same approved call already redeemed it (a chip whose handle() calls
+                    # super().handle() is wrapped twice); otherwise redeem now, or hold.
+                    if not (consumer.is_token(done) and done.action == action and done.org_id == context.org_id):
+                        token = md.get(consumer.CONSENT_TOKEN)
+                        if not consumer.redeem(token, self.name, request, context, action):
+                            return consumer.hold(self, request, context, action)
+                        context.metadata[CONSENT_REDEEMED] = token
                 return await handle(self, request, context, *args, **kw)
 
         handle_in_org._org_scoped = True
