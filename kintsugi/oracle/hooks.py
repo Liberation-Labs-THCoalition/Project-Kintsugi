@@ -179,10 +179,12 @@ class HTTPOracleHook:
                 latency_ms=(time.monotonic() - start) * 1000,
             )
         except Exception as exc:
-            logger.warning("Oracle endpoint %s failed: %s", self.endpoint, exc)
+            # The verdict reaches API callers (TurnResult.oracle): the error's id and type, never its text.
+            from kintsugi.skills.base import failure_reference
+            ref = failure_reference(logger, f"Oracle endpoint {self.endpoint}")
             return OracleVerdict(
                 status="error",
-                signals={"error": str(exc)},
+                signals={"error_type": type(exc).__name__, "error_id": ref},
                 source=self.name,
                 latency_ms=(time.monotonic() - start) * 1000,
             )

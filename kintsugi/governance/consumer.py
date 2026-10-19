@@ -15,7 +15,8 @@ import threading
 from dataclasses import dataclass
 
 from kintsugi.governance.consensus import ConsentCategory, payload_digest, get_consensus_gate
-from kintsugi.skills.base import RESERVED_PARAMETERS, SkillContext, SkillRequest, SkillResponse, is_shell_capable
+from kintsugi.skills.base import (RESERVED_PARAMETERS, SkillContext, SkillRequest, SkillResponse, failure_reference,
+                                  is_shell_capable)
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +110,9 @@ async def execute_approved(item_id: str, org_id: str, registry=None) -> dict:
             _live.add(token)
         try:
             response = await chip.handle(request, context)
-        except Exception as exc:
-            logger.exception("approved %s failed", item.id)
-            response = SkillResponse(content=f"the approved action failed: {exc}", success=False)
+        except Exception:
+            ref = failure_reference(logger, f"approved item {item.id}")
+            response = SkillResponse(content=f"the approved action couldn't complete (error {ref})", success=False)
         finally:
             with _lock:
                 _live.discard(token)

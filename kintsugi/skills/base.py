@@ -290,6 +290,15 @@ def consent_given(context) -> bool:
     return (getattr(context, "metadata", None) or {}).get(CONSENT_REDEEMED) is True
 
 
+def failure_reference(log, what: str) -> str:
+    """Log the exception being handled, with its traceback, under a short id, and return the id. Callers get a fixed
+    sentence and the id, never the exception's text, which can carry paths, ids or a SQL fragment (Vera, 2026-10-18)."""
+    import uuid
+    ref = uuid.uuid4().hex[:8]
+    log.exception("%s failed [error %s]", what, ref)
+    return ref
+
+
 def is_shell_capable(chip) -> bool:
     """Whether a chip can run shell commands. Keyed on capability, not name: a renamed shell chip is still a shell
     (Vera, 2026-09-29)."""

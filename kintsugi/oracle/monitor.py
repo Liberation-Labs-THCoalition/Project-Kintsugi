@@ -97,8 +97,10 @@ class OracleLoopMonitor:
             try:
                 verdict = await hook.review(turn)
             except Exception as exc:  # hook bug — never break the response path
-                logger.exception("Oracle hook %s raised", hook.name)
-                verdict = OracleVerdict(status="error", signals={"error": str(exc)}, source=hook.name)
+                from kintsugi.skills.base import failure_reference
+                ref = failure_reference(logger, f"Oracle hook {hook.name}")    # reaches callers: id and type only
+                verdict = OracleVerdict(status="error", signals={"error_type": type(exc).__name__, "error_id": ref},
+                                        source=hook.name)
             if worst is None or verdict.score > worst.score or (
                 verdict.status == "error" and worst.status not in ("flagged",)
             ):

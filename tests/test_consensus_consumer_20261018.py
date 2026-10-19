@@ -375,3 +375,22 @@ async def test_an_invoice_is_financial_and_needs_two_people():
     item = gate.get_item(held.data["consent_id"], org_id="org_a")
     assert item.category == ConsentCategory.FINANCIAL
     assert gate.approve(item.id, "key:k-admin", org_id="org_a").status == ConsentStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_an_approved_action_that_fails_names_an_error_id_not_the_exception():
+    class Breaks(BaseSkillChip):
+        name = "test_consensus_breaks"
+        description = "fails when it runs"
+        domain = SkillDomain.OPERATIONS
+        consensus_actions = ["disburse_funds"]
+        consensus_intents = {"pay_out": "disburse_funds"}
+
+        async def handle(self, request, context):
+            raise RuntimeError("SECRET connection string postgres://kintsugi:pw@db")
+    chip = Breaks()
+    held = await chip.handle(pay(), ctx())
+    get_consensus_gate().approve(held.data["consent_id"], "key:k-admin", org_id="org_a")
+    result = await consumer.execute_approved(held.data["consent_id"], "org_a", Registry(chip))
+    assert result["success"] is False and "SECRET" not in result["content"] and "error " in result["content"]
+    assert "SECRET" not in str(get_consensus_gate().get_item(held.data["consent_id"], org_id="org_a").result)
