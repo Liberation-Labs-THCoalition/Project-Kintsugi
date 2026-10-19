@@ -59,7 +59,6 @@ def _walk_strings(path: Path):
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "know_your_rights.py": "vanity hotlines and invented clinics; police rights shown for every topic",
     "food_access.py": "invented pantries, meal programs and a past pickup date with 555 numbers",
     "solidarity_economy.py": "invented coops, CDFI terms and a time-bank balance",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
@@ -111,7 +110,9 @@ def test_the_phone_pattern_catches_what_we_found():
 
 URL = re.compile(r"https?://|\bwww\.|\b[\w-]+\.(?:org|com|gov|net|edu)(?:/|\b)|[\w.+-]+@[\w-]+\.\w+")
 # Each checked by hand. A deployment's own links belong in its configuration, not in chip code.
-ALLOWED_URLS: set[str] = set()
+ALLOWED_URLS: set[str] = {
+    "https://www.aclu.org",  # the ACLU's own site (know_your_rights; checked 10-19)
+}
 
 
 def test_no_url_or_email_but_the_checked_ones():
@@ -239,6 +240,7 @@ REAL_CHIPS = {
     "RapidResponseChip": "says nobody was alerted and nothing sent; gives only configured lines, else 211 (10-19)",
     "CrisisResponseChip": "keeps real incident records; says nothing was broadcast or dispatched (10-19)",
     "HousingNavigatorChip": "lists nothing it can't look up; tenant law as questions to ask locally (10-19)",
+    "KnowYourRightsChip": "US-wide rights for police and immigration only; English said plainly; no invented org (10-19)",
 }
 
 
@@ -476,3 +478,46 @@ async def test_eviction_help_names_only_configured_lines():
     assert "isn't connected" in none.content and "211" in none.content and not PHONE.search(none.content)
     mine = await _housing("eviction_defense", contacts={"eviction_legal_help": "LINE-E"}, stage="court")
     assert "LINE-E" in mine.content and "DO NOT miss your court date" in mine.content
+
+
+# ---- know your rights: the repairs -------------------------------------------------------------------------------------
+
+async def _kyr(intent, contacts=None, **entities):
+    from kintsugi.skills.community_aid.know_your_rights import KnowYourRightsChip
+    return await KnowYourRightsChip(contacts=contacts).handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_police_rights_are_never_given_as_another_topics_rights():
+    for topic in ("tenant_rights", "worker_rights", "voting_rights", "disability_rights"):
+        r = await _kyr("rights_lookup", topic=topic, state="CA")
+        assert r.data["rights_info"] is None and "remain silent" not in r.content, topic
+    police = await _kyr("rights_lookup", topic="police_encounter")
+    assert "remain silent" in police.content and "Last updated" not in police.content
+
+
+@pytest.mark.asyncio
+async def test_immigration_rights_say_a_lawyer_isnt_appointed_and_name_the_judges_warrant():
+    r = await _kyr("rights_lookup", topic="immigration_rights")
+    assert "signed by a judge" in r.content and "isn't appointed" in r.content
+
+
+@pytest.mark.asyncio
+async def test_a_rights_card_says_it_is_in_english_and_names_no_invented_hotline():
+    es = await _kyr("rights_card", topic="police_encounter", language="es")
+    assert "this is in English, not es" in es.content and "write your local number here" in es.content
+    assert not PHONE.search(es.content) and es.data["rights_card"]["language"] == "en"
+    mine = await _kyr("rights_card", contacts={"legal_hotline": "LINE-K"}, topic="police_encounter")
+    assert "Legal help: LINE-K" in mine.content
+    tenant = await _kyr("rights_card", topic="tenant_rights")
+    assert tenant.data["rights_card"] is None
+
+
+@pytest.mark.asyncio
+async def test_clinics_and_legal_help_are_the_deployments_own_or_none():
+    clinics = await _kyr("legal_clinic", location="Oakland")
+    assert clinics.data["clinics"] == [] and "123 Main St" not in clinics.content and "isn't connected" in clinics.content
+    help_ = await _kyr("legal_resource")
+    assert "isn't connected" in help_.content and not PHONE.search(help_.content) and not URL.search(help_.content)
+    mine = await _kyr("legal_resource", contacts={"immigration_legal_help": "LINE-I"})
+    assert "LINE-I" in mine.content

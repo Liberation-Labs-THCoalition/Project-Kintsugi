@@ -898,8 +898,11 @@ class TestKnowYourRightsChip:
             entities={"topic": "tenant_rights", "state": "CA"},
         )
         response = await rights_chip.handle(request, context)
-        assert response.success
-        assert "rights_info" in response.data
+        # No rights database is connected: tenant rights depend on the state, so none are given (10-19)
+        assert response.success and response.data["rights_info"] is None
+        police = await rights_chip.handle(SkillRequest(intent="rights_lookup", entities={"topic": "police_encounter"}),
+                                          context)
+        assert "remain silent" in " ".join(police.data["rights_info"]["key_rights"])
 
     @pytest.mark.asyncio
     async def test_legal_disclaimer_in_response(
