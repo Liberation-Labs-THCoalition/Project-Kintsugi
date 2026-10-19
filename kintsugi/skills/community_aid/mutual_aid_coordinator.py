@@ -143,6 +143,23 @@ def _may_change(owner_id: str, context: SkillContext, hashed: bool = False) -> b
     return (bool(owner_id) and me == owner_id) or (context.metadata or {}).get("role") == "admin"
 
 
+_SETTLED = frozenset({AidStatus.FULFILLED, AidStatus.CANCELLED, AidStatus.EXPIRED})
+
+
+def _next_status(current: AidStatus, new_status: str, context: SkillContext) -> "tuple[AidStatus | None, str]":
+    """The status to move to, or None and why not. Once a record is fulfilled, cancelled or expired it's settled: only
+    an org admin may change it after that (Vera, 2026-10-18 LOW: an author turned a need an admin had cancelled into
+    "fulfilled"). An unknown status is refused in words rather than raised."""
+    try:
+        new = AidStatus(new_status)
+    except ValueError:
+        return None, (f"Unknown status {new_status!r}; use one of: "
+                      + ", ".join(s.value for s in AidStatus) + ".")
+    if current in _SETTLED and new != current and (context.metadata or {}).get("role") != "admin":
+        return None, f"This is already {current.value}; only an admin can change it now."
+    return new, ""
+
+
 class MutualAidCoordinatorChip(BaseSkillChip):
     """Coordinate mutual aid requests and offers with privacy preservation.
 
@@ -694,7 +711,10 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             if not _may_change(need.requester_id, context, hashed=True):
                 return SkillResponse(content="Only the person who posted this need, or an admin, can change it.",
                                      success=False)
-            need.status = AidStatus(new_status)
+            new, why = _next_status(need.status, new_status, context)
+            if new is None:
+                return SkillResponse(content=why, success=False)
+            need.status = new
             return SkillResponse(
                 content=f"Need status updated to {new_status}.",
                 success=True,
@@ -719,7 +739,10 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             if not _may_change(offer.offerer_id, context):
                 return SkillResponse(content="Only the person who made this offer, or an admin, can change it.",
                                      success=False)
-            offer.status = AidStatus(new_status)
+            new, why = _next_status(offer.status, new_status, context)
+            if new is None:
+                return SkillResponse(content=why, success=False)
+            offer.status = new
             return SkillResponse(
                 content=f"Offer status updated to {new_status}.",
                 success=True,
