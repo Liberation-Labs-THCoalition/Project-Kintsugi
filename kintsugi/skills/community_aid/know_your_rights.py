@@ -30,11 +30,13 @@ Example:
     )
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from kintsugi.skills.honesty import US_REFERRALS, not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -71,7 +73,7 @@ class RightsInfo:
     what_to_do: list[str]
     what_not_to_do: list[str]
     resources: list[dict[str, str]]
-    last_updated: datetime
+    last_updated: datetime | None  # None: not reviewed for any jurisdiction
     language: str = "en"
 
 
@@ -142,6 +144,66 @@ class KnowYourRightsChip(BaseSkillChip):
         ),
     }
     required_spans = ["legal_database", "clinic_scheduler", "translation_api"]
+    # Honest without its spans (kintsugi/skills/honesty.py): it gives the US rights that hold everywhere for police and
+    # immigration encounters, says plainly that it has nothing for other topics, and names no clinic, hotline or
+    # organization a deployment didn't configure. Everything is in English until a translation service is connected.
+    simulated = False
+
+    # Rights that hold across the US, with no jurisdiction data. Only these two topics have any.
+    POLICE_RIGHTS = [
+        "You have the right to remain silent",
+        "You can refuse consent to a search of yourself, your car or your home (police may still search with a "
+        "warrant or other legal grounds; don't resist, say clearly that you don't consent)",
+        "If you are arrested, you have the right to a lawyer",
+    ]
+    IMMIGRATION_RIGHTS = [
+        "You have the right to remain silent, about where you were born and your status too",
+        "You don't have to open your door unless agents show a warrant signed by a judge (an immigration form signed "
+        "by an officer isn't one); ask them to slide it under the door",
+        "You can refuse consent to a search",
+        "Don't sign anything you don't understand",
+        "You have the right to speak with a lawyer (in immigration cases, one isn't appointed for you)",
+    ]
+    WITH_RIGHTS = {"police_encounter": POLICE_RIGHTS, "protest_rights": POLICE_RIGHTS,
+                   "immigration_rights": IMMIGRATION_RIGHTS}
+
+    # What a person types, mapped to the three topics with US-wide rights (Vera, 10-19: the agent path sets no
+    # entities, so "ICE is at my door, what are my rights" got the fallback). Immigration first: ICE in capitals, or
+    # lowercase ice near a raid word, so "I slipped on ice" isn't read as a raid.
+    TOPIC_WORDS = [
+        ("immigration_rights", re.compile(r"\bICE\b")),
+        ("immigration_rights", re.compile(r"(?i)\b(immigration|immigrants?|deport\w*|la migra|undocumented|asylum|visas?|"
+                                          r"green card)\b")),
+        ("immigration_rights", re.compile(r"(?i)\bice\b.{0,40}\b(door|raids?|agents?|officers?|detain\w*|outside|"
+                                          r"here|coming)\b")),
+        ("immigration_rights", re.compile(r"(?i)\bwarrant\b.{0,40}\bdoor\b|\bdoor\b.{0,40}\bwarrant\b")),
+        ("protest_rights", re.compile(r"(?i)\b(protests?|protesting|march(es|ing)|rall(y|ies)|demonstrat\w*|picket\w*)\b")),
+        ("protest_rights", re.compile(r"\bmarch\b")),        # lowercase only: "in March" is the month
+        ("police_encounter", re.compile(r"(?i)\b(police|cops?|officers?|arrest\w*|pulled over|traffic stop|stopped me)\b")),
+    ]
+    TOPIC_CHOICES = ("I can give the rights that hold across the US for three situations: a police encounter, an "
+                     "immigration encounter (ICE at your door included), or a protest. Which is it?")
+
+    def _topic(self, request: SkillRequest, default: str | None = None) -> str | None:
+        """The topic the person named, or the one their words point to, or default."""
+        named = request.entities.get("topic")
+        if named:
+            return named
+        raw = getattr(request, "raw_input", "") or ""
+        for topic, pattern in self.TOPIC_WORDS:
+            if pattern.search(raw):
+                return topic
+        return default
+
+    def __init__(self, contacts: dict[str, str] | None = None) -> None:
+        super().__init__()
+        # The deployment's own lines: legal_hotline, legal_clinic, immigration_legal_help.
+        self.contacts = dict(contacts or {})
+
+    def _english_note(self, language: str) -> str:
+        if language and language != "en":
+            return (f"*{not_connected('A translation service', f'this is in English, not {language}')}*\n\n")
+        return ""
 
     # Supported languages for materials
     SUPPORTED_LANGUAGES = ["en", "es", "zh", "vi", "ko", "tl", "ar", "ru", "fr", "pt"]
@@ -193,7 +255,7 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             SkillResponse with rights information and disclaimer
         """
-        topic = request.entities.get("topic", "general")
+        topic = self._topic(request)
         state = request.entities.get("state", "federal")
         language = request.entities.get("language", "en")
 
@@ -201,21 +263,29 @@ class KnowYourRightsChip(BaseSkillChip):
         if language not in self.SUPPORTED_LANGUAGES:
             language = "en"
 
+        if topic is None:
+            # Nothing named and nothing recognised: offer the three, never a dead end.
+            return SkillResponse(
+                content=f"{self.TOPIC_CHOICES}\n\n{self.LEGAL_DISCLAIMER}",
+                success=True,
+                data={"topic": None, "rights_info": None, "choices": list(self.WITH_RIGHTS)},
+                suggestions=["My rights in a police encounter", "My rights if ICE comes", "My rights at a protest"],
+            )
+
         rights_info = await self.lookup_rights(topic, state, language)
 
         if not rights_info:
+            label = topic.replace("_", " ")
             return SkillResponse(
-                content=f"No rights information found for topic '{topic}' in {state}. "
-                f"\n\n{self.LEGAL_DISCLAIMER}",
-                success=False,
-                suggestions=[
-                    "Try a different topic or jurisdiction",
-                    "Contact a legal aid organization for assistance",
-                    "Schedule a legal clinic appointment",
-                ],
+                content=(f"{not_connected('A rights database', f'I can\'t look up {label} here')} "
+                         "A legal aid organization can, and it's free if you qualify. "
+                         f"{US_REFERRALS}\n\n{self.TOPIC_CHOICES}\n\n{self.LEGAL_DISCLAIMER}"),
+                success=True,
+                data={"topic": topic, "jurisdiction": state, "rights_info": None, "connected": False},
+                suggestions=["My rights in a police encounter", "My rights if ICE comes", "My rights at a protest"],
             )
 
-        content = self._format_rights_info(rights_info)
+        content = self._english_note(language) + self._format_rights_info(rights_info)
 
         return SkillResponse(
             content=content,
@@ -232,8 +302,6 @@ class KnowYourRightsChip(BaseSkillChip):
             },
             suggestions=[
                 "Would you like a know-your-rights card for this topic?",
-                "Find legal clinics in your area",
-                "Request information in another language",
             ],
         )
 
@@ -250,44 +318,36 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             RightsInfo if found, None otherwise
         """
-        # In production, this would query the legal_database span
-        # For now, return structured sample data
+        # No legal_database span is wired yet. Only police, protest and immigration encounters have rights that hold
+        # across the US; for every other topic the answer depends on the state, and none is made up.
         topic_enum = None
         for t in RightsTopic:
             if t.value == topic or t.name.lower() == topic.lower():
                 topic_enum = t
                 break
-
-        if not topic_enum:
+        if not topic_enum or topic_enum.value not in self.WITH_RIGHTS:
             return None
-
-        # Sample rights info (would come from database)
         return RightsInfo(
             topic=topic_enum,
             jurisdiction=jurisdiction,
-            title=f"{topic_enum.value.replace('_', ' ').title()} in {jurisdiction.upper()}",
-            summary=f"Overview of {topic_enum.value.replace('_', ' ')} protections.",
-            key_rights=[
-                "You have the right to remain silent",
-                "You have the right to refuse consent to searches",
-                "You have the right to an attorney",
-            ],
+            title=f"{topic_enum.value.replace('_', ' ').title()}: rights across the US",
+            summary="These hold everywhere in the US. Your state may add more; a legal aid organization can tell you.",
+            key_rights=list(self.WITH_RIGHTS[topic_enum.value]),
             what_to_do=[
-                "Stay calm and be polite",
-                "Ask if you are free to leave",
-                "Document the interaction if safe to do so",
+                "Stay calm",
+                "Ask if you are free to leave; if you are, leave calmly",
+                "Write down what happened, and names or badge numbers, as soon as you safely can",
             ],
             what_not_to_do=[
                 "Do not physically resist",
-                "Do not provide false information",
+                "Do not lie or give false documents",
                 "Do not consent to searches",
             ],
             resources=[
-                {"name": "ACLU", "url": "https://www.aclu.org"},
-                {"name": "Legal Aid Society", "url": "https://www.legalaid.org"},
+                {"name": "ACLU: Know Your Rights", "url": "https://www.aclu.org"},
             ],
-            last_updated=datetime.now(timezone.utc),
-            language=language,
+            last_updated=None,
+            language="en",
         )
 
     async def _handle_legal_clinic(
@@ -313,17 +373,14 @@ class KnowYourRightsChip(BaseSkillChip):
         clinics = await self.schedule_clinic(topic, location, language)
 
         if not clinics:
+            line = self.contacts.get("legal_clinic")
+            contact = f"Your organization's legal clinic: **{line}**." if line else US_REFERRALS
             return SkillResponse(
-                content=f"No upcoming legal clinics found in {location}. "
-                f"Check back soon or contact local legal aid for assistance."
-                f"\n\n{self.LEGAL_DISCLAIMER}",
+                content=(f"{not_connected('A clinic scheduler', 'I can\'t list clinics near you')} {contact}"
+                         f"\n\n{self.LEGAL_DISCLAIMER}"),
                 success=True,
-                data={"clinics": []},
-                suggestions=[
-                    "Set up an alert for new clinic dates",
-                    "Find virtual legal clinic options",
-                    "Contact legal aid hotline",
-                ],
+                data={"clinics": [], "connected": False},
+                suggestions=[],
             )
 
         content = "**Upcoming Legal Clinics**\n\n"
@@ -341,7 +398,7 @@ class KnowYourRightsChip(BaseSkillChip):
             content=content,
             success=True,
             data={"clinics": [{"id": c.clinic_id, "name": c.name} for c in clinics]},
-            suggestions=["Register for a clinic", "Get directions", "Add to calendar"],
+            suggestions=[],
         )
 
     async def schedule_clinic(
@@ -357,22 +414,8 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             List of matching legal clinics
         """
-        # In production, this would query the clinic_scheduler span
-        # Return sample clinic data
-        return [
-            LegalClinic(
-                clinic_id="clinic_001",
-                name="Community Legal Clinic",
-                date=datetime(2024, 2, 15, 18, 0, tzinfo=timezone.utc),
-                location="Community Center, 123 Main St",
-                topics=["tenant_rights", "worker_rights"],
-                languages=["en", "es"],
-                capacity=20,
-                registered=12,
-                attorneys=["Maria Garcia, Esq.", "John Smith, Esq."],
-                is_virtual=False,
-            ),
-        ]
+        # No clinic_scheduler span is wired yet: there are no clinics to list, and none is made up.
+        return []
 
     async def _schedule_clinic_action(
         self, request: SkillRequest, context: SkillContext
@@ -424,9 +467,7 @@ class KnowYourRightsChip(BaseSkillChip):
             success=True,
             data={"workshop_plan": workshop_plan},
             suggestions=[
-                "Schedule this workshop",
-                "Generate participant materials",
-                "Find facilitators",
+                "Get a know-your-rights card for this topic",
             ],
         )
 
@@ -485,14 +526,16 @@ class KnowYourRightsChip(BaseSkillChip):
 
         resources = await self.find_legal_resources(resource_type, location, urgency)
 
-        content = "**Legal Resources**\n\n"
-        for resource in resources:
-            content += f"**{resource['name']}**\n"
-            content += f"- Type: {resource['type']}\n"
-            content += f"- Contact: {resource['contact']}\n"
-            if resource.get("hotline"):
-                content += f"- Hotline: {resource['hotline']}\n"
-            content += f"- Services: {resource['services']}\n\n"
+        content = "**Legal help**\n\n"
+        if resources:
+            for resource in resources:
+                content += f"- {resource['name']}: **{resource['contact']}**\n"
+            content += "\n"
+        else:
+            content += (f"{not_connected('A legal resource directory', 'I can\'t name an organization near you')} "
+                        "Call 211 and ask for free legal aid.\n\n")
+        content += ("For immigration help, look for a lawyer or a nonprofit's accredited representative: a notario "
+                    "can't give legal advice in the US.\n")
 
         content += f"\n{self.LEGAL_DISCLAIMER}"
 
@@ -500,7 +543,7 @@ class KnowYourRightsChip(BaseSkillChip):
             content=content,
             success=True,
             data={"resources": resources},
-            suggestions=["Get more details", "Find pro bono attorneys", "Emergency legal help"],
+            suggestions=["Get a know-your-rights card"],
         )
 
     async def find_legal_resources(
@@ -516,23 +559,10 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             List of legal resources with contact info
         """
-        # In production, this would query the legal_database span
-        return [
-            {
-                "name": "Local Legal Aid Society",
-                "type": "legal_aid",
-                "contact": "contact@legalaid.org",
-                "hotline": "1-800-LEGAL-AID",
-                "services": "Free legal services for low-income individuals",
-            },
-            {
-                "name": "Immigrant Rights Hotline",
-                "type": "immigration",
-                "contact": "help@immigrantrights.org",
-                "hotline": "1-800-IMM-HELP",
-                "services": "Immigration legal assistance and know-your-rights",
-            },
-        ]
+        # Only the deployment's own lines: no legal_database span is wired yet, so no organization is named.
+        named = [("legal_hotline", "Legal hotline"), ("legal_clinic", "Legal clinic"),
+                 ("immigration_legal_help", "Immigration legal help")]
+        return [{"name": label, "contact": self.contacts[key]} for key, label in named if self.contacts.get(key)]
 
     async def _handle_rights_card(
         self, request: SkillRequest, context: SkillContext
@@ -546,24 +576,29 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             SkillResponse with rights card content
         """
-        topic = request.entities.get("topic", "police_encounter")
+        topic = self._topic(request, default="police_encounter")
         language = request.entities.get("language", "en")
         format_type = request.entities.get("format", "text")
 
         rights_card = await self.generate_rights_card(topic, language)
 
+        if rights_card is None:
+            label = topic.replace("_", " ")
+            return SkillResponse(
+                content=(f"{not_connected('A rights database', f'I can\'t make a card for {label}')} Cards exist for "
+                         f"police encounters and immigration encounters.\n\n{self.LEGAL_DISCLAIMER}"),
+                success=True,
+                data={"rights_card": None, "connected": False},
+                suggestions=["Get a know-your-rights card for police encounters"],
+            )
         return SkillResponse(
-            content=f"**Know Your Rights Card: {topic.replace('_', ' ').title()}**\n"
-            f"*Language: {language}*\n\n"
+            content=f"**Know Your Rights Card: {topic.replace('_', ' ').title()}**\n\n"
+            f"{self._english_note(language)}"
             f"{rights_card['content']}\n\n"
             f"---\n{self.LEGAL_DISCLAIMER}",
             success=True,
             data={"rights_card": rights_card},
-            suggestions=[
-                "Download printable version",
-                "Get card in another language",
-                "Share with community",
-            ],
+            suggestions=[],
         )
 
     async def generate_rights_card(
@@ -578,23 +613,23 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             Rights card content and metadata
         """
-        # In production, this would use the translation_api span
+        # English only: no translation_api span is wired yet. Only topics with rights that hold across the US get a card.
+        rights = self.WITH_RIGHTS.get(topic)
+        if rights is None:
+            return None
+        lines = "\n".join(f"{i}. {r}." for i, r in enumerate(rights, 1))
+        line = self.contacts.get("legal_hotline")
+        contact = f"Legal help: {line}" if line else "Legal help: ______________________ (write your local number here)"
         return {
             "topic": topic,
-            "language": language,
+            "language": "en",
             "content": (
                 "YOU HAVE RIGHTS\n\n"
-                "1. You have the right to remain silent.\n"
-                "2. You have the right to refuse searches.\n"
-                "3. You have the right to a lawyer.\n"
-                "4. If arrested, say: 'I wish to remain silent. "
-                "I want to speak to a lawyer.'\n\n"
-                "EMERGENCY CONTACTS:\n"
-                "Legal Hotline: 1-800-LEGAL-AID\n"
-                "Immigration Hotline: 1-800-IMM-HELP"
+                f"{lines}\n"
+                f"{len(rights) + 1}. If arrested or detained, say: 'I wish to remain silent. I want to speak to a lawyer.'\n\n"
+                f"{contact}"
             ),
-            "printable_url": None,  # Would be generated in production
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "printable_url": None,
         }
 
     def _format_rights_info(self, rights_info: RightsInfo) -> str:
@@ -625,7 +660,6 @@ class KnowYourRightsChip(BaseSkillChip):
         for resource in rights_info.resources:
             content += f"- [{resource['name']}]({resource['url']})\n"
 
-        content += f"\n*Last updated: {rights_info.last_updated.strftime('%B %d, %Y')}*\n"
         content += f"\n---\n{self.LEGAL_DISCLAIMER}"
 
         return content

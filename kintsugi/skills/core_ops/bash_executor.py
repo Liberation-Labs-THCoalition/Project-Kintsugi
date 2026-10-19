@@ -73,6 +73,7 @@ class BashSkillChip(BaseSkillChip):
 
     name = "bash_executor"
     domain = SkillDomain.SHELL
+    simulated = False  # it runs the command and reports what happened (kintsugi/skills/honesty.py)
     description = "Execute shell commands in the companion's workspace"
     version = "1.0.0"
     capabilities = [SkillCapability.EXECUTE_SHELL, SkillCapability.WRITE_DATA]

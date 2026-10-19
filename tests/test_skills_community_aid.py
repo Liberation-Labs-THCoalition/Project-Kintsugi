@@ -898,8 +898,11 @@ class TestKnowYourRightsChip:
             entities={"topic": "tenant_rights", "state": "CA"},
         )
         response = await rights_chip.handle(request, context)
-        assert response.success
-        assert "rights_info" in response.data
+        # No rights database is connected: tenant rights depend on the state, so none are given (10-19)
+        assert response.success and response.data["rights_info"] is None
+        police = await rights_chip.handle(SkillRequest(intent="rights_lookup", entities={"topic": "police_encounter"}),
+                                          context)
+        assert "remain silent" in " ".join(police.data["rights_info"]["key_rights"])
 
     @pytest.mark.asyncio
     async def test_legal_disclaimer_in_response(
@@ -1148,13 +1151,9 @@ class TestFoodAccessChip:
         assert "household_size" in response.data or "income" in response.data
 
     @pytest.mark.asyncio
-    async def test_snap_income_limits_defined(self, food_chip: FoodAccessChip):
-        """Test SNAP income limits are defined."""
-        assert hasattr(food_chip, "SNAP_INCOME_LIMITS")
-        assert len(food_chip.SNAP_INCOME_LIMITS) > 0
-        # Should have limits for household sizes 1-8
-        assert 1 in food_chip.SNAP_INCOME_LIMITS
-        assert 4 in food_chip.SNAP_INCOME_LIMITS
+    async def test_no_stale_snap_limits_decide_anything(self, food_chip: FoodAccessChip):
+        """The FY2024 table is gone (10-19): limits change every October and differ by state, so no verdict is given."""
+        assert not hasattr(food_chip, "SNAP_INCOME_LIMITS")
 
     @pytest.mark.asyncio
     async def test_meal_schedule_intent(
@@ -1184,7 +1183,8 @@ class TestFoodAccessChip:
         )
         response = await food_chip.handle(request, context)
         assert response.success
-        assert "donation_id" in response.data
+        # Nothing is connected, so nothing was recorded (10-19: it used to give a donation ID and a pickup time)
+        assert response.data["recorded"] is False and "not been recorded" in response.content
 
 
 # ===========================================================================
@@ -1252,10 +1252,8 @@ class TestSolidarityEconomyChip:
         )
         response = await solidarity_chip.handle(request, context)
         assert response.success
-        # Should return account info with balance
-        assert "account" in response.data
-        account = response.data["account"]
-        assert hasattr(account, "balance_hours")
+        # No ledger is connected, so no balance is shown (10-19: every member was told 12.5 hours)
+        assert response.data["connected"] is False and "isn't connected" in response.content
 
     @pytest.mark.asyncio
     async def test_coop_search_intent(
@@ -1368,7 +1366,8 @@ class TestRapidResponseChip:
         # Held for consent before anything is sent (Vera's re-check, 2026-10-18: it used to alert, then flag)
         assert response.success and response.requires_consensus and response.metadata.get("held")
         assert response.consensus_action == "activate_rapid_response" and "consent_id" in response.data
-        # Once approved, it runs: the alert is created
+        # Once approved, it runs, and says plainly that nobody was alerted: no alert network is connected yet
+        # (kintsugi/skills/honesty.py; until 10-19 it claimed 15 responders notified and observers dispatched).
         from kintsugi.governance import consumer
         from kintsugi.governance.consensus import get_consensus_gate
         get_consensus_gate().approve(response.data["consent_id"], "key:k-admin", org_id=context.org_id)
@@ -1377,7 +1376,8 @@ class TestRapidResponseChip:
             def get(self, name):
                 return rapid_response_chip
         result = await consumer.execute_approved(response.data["consent_id"], context.org_id, _One())
-        assert result["success"] and "alert_id" in result["data"]
+        assert result["success"] and result["data"]["sent"] is False and result["data"]["responders_notified"] == 0
+        assert "nobody has been alerted" in result["content"]
 
     @pytest.mark.asyncio
     async def test_privacy_security_in_response(

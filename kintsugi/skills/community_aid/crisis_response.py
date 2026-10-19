@@ -44,6 +44,7 @@ from typing import Any
 from uuid import uuid4
 
 from kintsugi.skills.base import consent_given
+from kintsugi.skills.honesty import US_DANGER, not_connected
 from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
@@ -174,11 +175,11 @@ class CrisisResponseChip(BaseSkillChip):
     4. Status updates and coordination
     5. Post-incident debriefing
 
-    Escalation tiers:
-    - CRITICAL: Immediate all-hands alert, emergency protocol activation
-    - HIGH: Rapid response team deployment, leadership notification
-    - MEDIUM: Coordinated response, standard protocols
-    - LOW: Monitored response, limited mobilization
+    Escalation tiers (steps for the team; this chip notifies nobody until an alert system is connected):
+    - CRITICAL: all-hands alert, emergency protocol (held for approval)
+    - HIGH: rapid response team, leadership
+    - MEDIUM: coordinated response
+    - LOW: monitored response
     """
 
     name = "crisis_response"
@@ -219,6 +220,17 @@ class CrisisResponseChip(BaseSkillChip):
         "resource_inventory",
         "emergency_contacts",
     ]
+    # Honest without its spans (kintsugi/skills/honesty.py): incidents, statuses and debriefs are real records here;
+    # nothing is broadcast, dispatched or delivered, and every response says so.
+    simulated = False
+
+    NOT_SENT = not_connected("An alert system", "nobody has been notified, and the steps below are for your team")
+
+    def while_held(self, action: str) -> str:
+        if action == "activate_emergency_protocol":
+            return (f"{not_connected('An alert system', 'approving this will not notify anyone')} "
+                    f"Don't wait for it to start your own phone tree. {US_DANGER}")
+        return ""
 
     # Simulated storage
     _incidents: dict[str, CrisisIncident] = org_scoped(dict)
@@ -297,12 +309,15 @@ class CrisisResponseChip(BaseSkillChip):
         # Get escalation response
         escalation = self._get_escalation_response(severity)
 
+        steps = "\n".join(f"- {a}" for a in escalation["actions"])
+        danger = f"{US_DANGER}\n\n" if severity in (CrisisSeverity.CRITICAL, CrisisSeverity.HIGH) else ""
         return SkillResponse(
-            content=f"CRISIS ALERT: {incident.title}\n"
+            content=f"Incident recorded: {incident.title}\n"
                     f"Severity: {severity.value.upper()}\n"
                     f"Location: {incident.location}\n"
                     f"Incident ID: {incident.id[:8]}...\n\n"
-                    f"Escalation: {escalation['description']}",
+                    f"{danger}{self.NOT_SENT}\n\n"
+                    f"{escalation['description']}\n{steps}",
             success=True,
             data={
                 "incident_id": incident.id,
@@ -312,9 +327,8 @@ class CrisisResponseChip(BaseSkillChip):
                 "escalation": escalation,
             },
             suggestions=[
-                "Mobilize volunteers with 'mobilize crisis response'",
-                "Deploy resources with 'deploy emergency resources'",
                 "Update status with 'update incident status'",
+                "Record a debrief once it's resolved",
             ],
         )
 
@@ -345,9 +359,15 @@ class CrisisResponseChip(BaseSkillChip):
 
         incident = self._incidents[incident_id]
 
+        if mobilized:
+            mobilized_text = (f"Marked {len(mobilized)} volunteer(s) as deployed to incident {incident_id[:8]}... in "
+                              f"this system. {not_connected('A volunteer dispatch system', 'none of them has been told')} "
+                              f"Contact them yourselves.")
+        else:
+            mobilized_text = ("No volunteers on record here match this incident, so none was marked deployed. Contact "
+                              "your volunteers directly.")
         return SkillResponse(
-            content=f"Mobilized {len(mobilized)} volunteers for incident {incident_id[:8]}...\n"
-                    f"Volunteers have been notified and are being dispatched to {incident.location}.",
+            content=mobilized_text,
             success=True,
             data={
                 "incident_id": incident_id,
@@ -356,8 +376,7 @@ class CrisisResponseChip(BaseSkillChip):
                 "skills_covered": list({skill for v in mobilized for skill in v.skills}),
             },
             suggestions=[
-                "Track volunteer status with 'show volunteer deployment status'",
-                "Send update with 'broadcast incident update'",
+                "Update status with 'update incident status'",
             ],
         )
 
@@ -387,7 +406,8 @@ class CrisisResponseChip(BaseSkillChip):
         )
 
         return SkillResponse(
-            content=f"Deployed {len(deployed)} resource types for incident {incident_id[:8]}...",
+            content=(f"Marked {len(deployed)} resource(s) as deployed to incident {incident_id[:8]}... in this system. "
+                     f"{not_connected('A resource inventory', 'nothing has been moved or delivered')}"),
             success=True,
             data={
                 "incident_id": incident_id,
@@ -441,7 +461,8 @@ class CrisisResponseChip(BaseSkillChip):
 
         return SkillResponse(
             content=f"Incident {incident_id[:8]}... status: {incident.status.value}\n"
-                    f"Latest update: {updated['message']}",
+                    f"Latest update: {updated['message']}\n"
+                    f"Recorded here; {not_connected('An alert system', 'it has not been broadcast to anyone')}",
             success=True,
             data={
                 "incident_id": incident_id,
@@ -493,10 +514,7 @@ class CrisisResponseChip(BaseSkillChip):
                 "lessons_learned": debrief.lessons_learned,
                 "recommendations": debrief.recommendations,
             },
-            suggestions=[
-                "Share debrief with 'distribute debrief report'",
-                "Create action items with 'create follow-up tasks'",
-            ],
+            suggestions=[],
         )
 
     # Core business logic methods
@@ -542,12 +560,13 @@ class CrisisResponseChip(BaseSkillChip):
 
         self._incidents[incident.id] = incident
 
-        # Log alert
+        # Log what an alert would reach. Nothing is sent: no alert_system span is connected.
         self._alert_log.append({
             "incident_id": incident.id,
             "severity": severity,
-            "sent_at": now.isoformat(),
-            "recipients": self._get_alert_recipients(CrisisSeverity(severity)),
+            "logged_at": now.isoformat(),
+            "sent": False,
+            "would_notify": self._get_alert_recipients(CrisisSeverity(severity)),
         })
 
         # Auto-transition to assessing
@@ -737,44 +756,42 @@ class CrisisResponseChip(BaseSkillChip):
         escalation_plans = {
             CrisisSeverity.CRITICAL: {
                 "level": 4,
-                "description": "Emergency protocol activated. All available responders alerted. "
-                              "Leadership and emergency services notified.",
+                "description": "Critical. Steps for your team to take now:",
                 "actions": [
-                    "Activate all-hands alert",
-                    "Notify emergency services",
-                    "Open emergency operations center",
-                    "Authorize emergency fund access",
+                    "Start an all-hands alert (phone tree, group chat)",
+                    "Call emergency services if anyone is in danger",
+                    "Open an emergency operations point",
+                    "Ask for emergency fund access (it needs approval)",
                 ],
                 "notification_groups": ["all_volunteers", "leadership", "emergency_services"],
             },
             CrisisSeverity.HIGH: {
                 "level": 3,
-                "description": "Rapid response initiated. Response teams dispatched. "
-                              "Leadership notified.",
+                "description": "High. Steps for your team to take now:",
                 "actions": [
-                    "Dispatch rapid response team",
-                    "Notify leadership",
-                    "Prepare resource deployment",
+                    "Call out the rapid response team",
+                    "Tell leadership",
+                    "Prepare resources",
                 ],
                 "notification_groups": ["rapid_response", "leadership"],
             },
             CrisisSeverity.MEDIUM: {
                 "level": 2,
-                "description": "Coordinated response initiated. Relevant teams notified.",
+                "description": "Medium. Steps for your team:",
                 "actions": [
-                    "Notify relevant volunteer teams",
+                    "Tell the relevant volunteer teams",
                     "Assess resource needs",
-                    "Establish coordination point",
+                    "Set up a coordination point",
                 ],
                 "notification_groups": ["relevant_teams", "coordinators"],
             },
             CrisisSeverity.LOW: {
                 "level": 1,
-                "description": "Monitored response. Standard procedures applied.",
+                "description": "Low. Steps for your team:",
                 "actions": [
-                    "Log incident",
-                    "Monitor situation",
-                    "Notify on-call coordinator",
+                    "Keep the incident record current",
+                    "Monitor the situation",
+                    "Tell the on-call coordinator",
                 ],
                 "notification_groups": ["on_call"],
             },

@@ -22,6 +22,7 @@ class EchoChip(BaseSkillChip):
     name = "echo"
     description = "Echoes input for testing"
     domain = SkillDomain.OPERATIONS
+    simulated = False  # a test fixture whose responses are exactly what it did
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         return SkillResponse(content=f"echo: {request.raw_input}")

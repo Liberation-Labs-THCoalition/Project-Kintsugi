@@ -67,6 +67,8 @@ def secret_key():
 class _StubChip(BaseSkillChip):
     """Minimal skill chip for testing."""
 
+    simulated = False  # a test fixture whose responses are exactly what it did
+
     def __init__(self, chip_name: str, domain: SkillDomain):
         super().__init__()
         self.name = chip_name

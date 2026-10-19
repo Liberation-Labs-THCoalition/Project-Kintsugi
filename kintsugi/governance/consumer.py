@@ -72,6 +72,8 @@ def hold(chip, request, context, action: str) -> SkillResponse:
     no_step = (getattr(chip, "consensus_no_step", None) or {}).get(action)
     note = (f" Approving it records the decision, but this skill has no step that carries it out yet ({no_step}), "
             f"so nothing will happen automatically." if no_step else "")
+    now = chip.while_held(action) if hasattr(chip, "while_held") else ""
+    note += f" {now}" if now else ""
     return SkillResponse(
         content=(f"This needs approval before it happens ({action}). Nothing has been done yet; it's waiting for "
                  f"approval as request {item.id}.{note}"),

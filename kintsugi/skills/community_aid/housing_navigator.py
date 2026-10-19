@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from kintsugi.skills.honesty import US_REFERRALS, not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -154,15 +155,18 @@ class HousingNavigatorChip(BaseSkillChip):
         "share_tenant_data": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }
     required_spans = ["housing_database", "voucher_tracker", "landlord_registry", "hud_api"]
+    # Honest without its spans (kintsugi/skills/honesty.py): no listing, application, landlord record or hotline is
+    # invented. Tenant law depends on the place, so it gives the questions to ask, not rules it can't know.
+    simulated = False
 
-    # Fair Market Rent limits by bedroom count (sample, would come from HUD API)
-    FMR_LIMITS: dict[int, float] = {
-        0: 1200.0,  # Studio
-        1: 1400.0,
-        2: 1700.0,
-        3: 2100.0,
-        4: 2400.0,
-    }
+    def __init__(self, contacts: dict[str, str] | None = None) -> None:
+        super().__init__()
+        # The deployment's own lines: housing_authority, eviction_legal_help, rental_assistance, tenant_union.
+        self.contacts = dict(contacts or {})
+
+    def _contact_lines(self, keys: list[tuple[str, str]]) -> str:
+        lines = [f"- {label}: **{self.contacts[key]}**" for key, label in keys if self.contacts.get(key)]
+        return "\n".join(lines) + "\n" if lines else ""
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -219,17 +223,16 @@ class HousingNavigatorChip(BaseSkillChip):
 
         if not units:
             return SkillResponse(
-                content="No housing units found matching your criteria. "
-                "Housing availability changes frequently - consider:\n"
-                "- Expanding your search area\n"
-                "- Adjusting bedroom requirements\n"
-                "- Setting up alerts for new listings",
+                content=(f"{not_connected('A housing listings database', 'I can\'t search units for you')} "
+                         "Your local housing authority can point you to landlords who accept vouchers. "
+                         f"{US_REFERRALS}\n"
+                         + self._contact_lines([("housing_authority", "Your housing authority"),
+                                                ("tenant_union", "Your tenant union")])),
                 success=True,
-                data={"units": []},
+                data={"units": [], "connected": False},
                 suggestions=[
-                    "Set up housing alerts",
-                    "Expand search criteria",
-                    "Check voucher waitlist status",
+                    "Get tenant rights questions to ask locally",
+                    "Get eviction defense steps",
                 ],
             )
 
@@ -257,9 +260,7 @@ class HousingNavigatorChip(BaseSkillChip):
                 "total_found": len(units),
             },
             suggestions=[
-                "Get landlord info for a property",
-                "Check if your voucher covers this rent",
-                "Schedule a viewing",
+                "Get tenant rights questions to ask locally",
             ],
         )
 
@@ -283,44 +284,8 @@ class HousingNavigatorChip(BaseSkillChip):
         Returns:
             List of matching housing units
         """
-        # In production, this would query housing_database and hud_api spans
-        sample_units = [
-            HousingUnit(
-                unit_id="unit_001",
-                address="456 Oak Street, Apt 2B",
-                city="Oakland",
-                state="CA",
-                zip_code="94612",
-                bedrooms=2,
-                bathrooms=1.0,
-                rent=1650.0,
-                accepts_voucher=True,
-                voucher_types=[VoucherType.HCV, VoucherType.EHV],
-                landlord_id="landlord_001",
-                amenities=["laundry", "parking"],
-                accessibility=["ground_floor", "wide_doorways"],
-                status=HousingStatus.AVAILABLE,
-                available_date=datetime(2024, 3, 1, tzinfo=timezone.utc),
-                utilities_included=["water", "trash"],
-            ),
-            HousingUnit(
-                unit_id="unit_002",
-                address="789 Pine Avenue, Unit 5",
-                city="Oakland",
-                state="CA",
-                zip_code="94610",
-                bedrooms=3,
-                bathrooms=1.5,
-                rent=2050.0,
-                accepts_voucher=True,
-                voucher_types=[VoucherType.HCV, VoucherType.PBV, VoucherType.FUP],
-                landlord_id="landlord_002",
-                amenities=["laundry", "backyard"],
-                accessibility=[],
-                status=HousingStatus.AVAILABLE,
-                available_date=datetime(2024, 2, 15, tzinfo=timezone.utc),
-            ),
-        ]
+        # No housing_database or hud_api span is wired yet, so there are no units to list, and none is made up.
+        sample_units: list[HousingUnit] = []
 
         # Filter based on criteria
         results = []
@@ -357,15 +322,17 @@ class HousingNavigatorChip(BaseSkillChip):
 
         if not status:
             return SkillResponse(
-                content="No voucher application found. Would you like to:\n"
-                "- Start a new voucher application\n"
-                "- Learn about voucher programs\n"
-                "- Check eligibility requirements",
+                content=(f"{not_connected('A voucher tracker', 'I can\'t look up your application or waitlist position')} "
+                         "Your local public housing agency can tell you both.\n\n"
+                         "While you wait:\n"
+                         "- Keep your contact information current with the agency\n"
+                         "- Answer its mail promptly: missed letters can cost a place on the list\n"
+                         "- Ask how soon income changes must be reported (each agency sets its own rule)\n"
+                         + self._contact_lines([("housing_authority", "Your housing authority")])),
                 success=True,
+                data={"status": "not_connected", "connected": False, "application_id": application_id},
                 suggestions=[
-                    "Start voucher application",
-                    "Learn about Section 8",
-                    "Check eligibility",
+                    "Get tenant rights questions to ask locally",
                 ],
             )
 
@@ -396,9 +363,7 @@ class HousingNavigatorChip(BaseSkillChip):
                 "waitlist_position": status.waitlist_position,
             },
             suggestions=[
-                "Update contact information",
-                "Check eligibility for other programs",
-                "Find emergency housing resources",
+                "Get eviction defense steps",
             ],
         )
 
@@ -414,21 +379,8 @@ class HousingNavigatorChip(BaseSkillChip):
         Returns:
             VoucherApplication if found, None otherwise
         """
-        # In production, this would query the voucher_tracker span
-        return VoucherApplication(
-            application_id=application_id or "APP-2024-001234",
-            voucher_type=VoucherType.HCV,
-            status="On Waitlist",
-            applied_date=datetime(2023, 6, 15, tzinfo=timezone.utc),
-            waitlist_position=234,
-            estimated_wait="12-18 months",
-            last_updated=datetime.now(timezone.utc),
-            next_steps=[
-                "Keep your contact information current",
-                "Respond promptly to any mailings",
-                "Report any income changes within 10 days",
-            ],
-        )
+        # No voucher_tracker span is wired yet: nothing is looked up, so nothing is returned.
+        return None
 
     async def _handle_tenant_rights(
         self, request: SkillRequest, context: SkillContext
@@ -448,27 +400,27 @@ class HousingNavigatorChip(BaseSkillChip):
 
         rights_info = await self.get_tenant_rights(state, city, issue)
 
-        content = f"**Tenant Rights in {city or state}**\n\n"
-
-        for category, rights in rights_info.items():
+        place = city or state or "your area"
+        content = f"**Tenant rights in {place}: questions to ask locally**\n\n"
+        content += (f"Tenant law depends on your state and city. "
+                    f"{not_connected('A jurisdiction database', f'I can\'t tell you which rules apply in {place}')} "
+                    "Ask a local tenant organization or legal aid these:\n\n")
+        for category, questions in rights_info.items():
             content += f"**{category}:**\n"
-            for right in rights:
-                content += f"- {right}\n"
+            for q in questions:
+                content += f"- {q}\n"
             content += "\n"
-
-        content += (
-            "\n*Note: Tenant protections vary by jurisdiction. "
-            "Contact a tenant rights organization for specific advice.*"
-        )
+        content += ("Wherever you live: keep copies of every notice, letter and text, and make repair requests in "
+                    f"writing. {US_REFERRALS}\n")
+        content += self._contact_lines([("tenant_union", "Your tenant union"),
+                                        ("eviction_legal_help", "Legal help")])
 
         return SkillResponse(
             content=content,
             success=True,
-            data={"rights": rights_info, "jurisdiction": city or state},
+            data={"questions": rights_info, "jurisdiction": city or state, "connected": False},
             suggestions=[
-                "Find tenant rights organizations",
-                "Report a housing code violation",
-                "Get eviction defense help",
+                "Get eviction defense steps",
             ],
         )
 
@@ -485,28 +437,22 @@ class HousingNavigatorChip(BaseSkillChip):
         Returns:
             Dictionary of rights categories and specific rights
         """
-        # In production, this would query housing_database for jurisdiction-specific info
+        # No jurisdiction data is wired yet, so these are the questions whose answers differ by place, never answers.
         return {
-            "Right to Habitable Housing": [
-                "Working plumbing, heating, and electricity",
-                "Freedom from pests and mold",
-                "Adequate weatherproofing",
-                "Functioning smoke and CO detectors",
+            "Repairs": [
+                "What repairs must my landlord make (heat, water, electricity, pests, mold), and how fast?",
+                "How do I ask for repairs so it counts (in writing, to whom)?",
             ],
-            "Rent Control Protections": [
-                "Rent increases limited to annual cap",
-                "Just cause eviction required",
-                "Right to petition for rent reduction",
+            "Rent": [
+                "Does my city or state limit rent increases? (Many don't.)",
+                "How much notice must I get before a rent increase?",
             ],
-            "Privacy Rights": [
-                "24-48 hour notice before landlord entry",
-                "Entry only during reasonable hours",
-                "Emergency entry only for true emergencies",
+            "Entry": [
+                "How much notice must my landlord give before entering, and when may they enter?",
             ],
-            "Anti-Retaliation Protections": [
-                "Cannot be evicted for reporting violations",
-                "Cannot raise rent in retaliation",
-                "Protected for organizing with other tenants",
+            "Eviction and retaliation": [
+                "Does my landlord need a legal reason (\"just cause\") to end my tenancy here?",
+                "Am I protected from retaliation for reporting problems or organizing with neighbors?",
             ],
         }
 
@@ -530,15 +476,14 @@ class HousingNavigatorChip(BaseSkillChip):
 
         if not record:
             return SkillResponse(
-                content="No landlord information found. You can:\n"
-                "- Search by property address\n"
-                "- Search by landlord name\n"
-                "- Report landlord issues to build the database",
+                content=(f"{not_connected('A landlord registry', 'I have no record for this landlord')} "
+                         "Your city or county may publish code-violation records, and local tenant unions often keep "
+                         "their own notes on landlords.\n"
+                         + self._contact_lines([("tenant_union", "Your tenant union")])),
                 success=True,
+                data={"connected": False, "landlord_id": None},
                 suggestions=[
-                    "Search by address",
-                    "Report an issue",
-                    "Find tenant resources",
+                    "Get tenant rights questions to ask locally",
                 ],
             )
 
@@ -569,9 +514,7 @@ class HousingNavigatorChip(BaseSkillChip):
                 "complaints": record.complaint_count,
             },
             suggestions=[
-                "Report an issue with this landlord",
-                "Find properties by this landlord",
-                "Get tenant rights info",
+                "Get tenant rights questions to ask locally",
             ],
         )
 
@@ -591,23 +534,8 @@ class HousingNavigatorChip(BaseSkillChip):
         Returns:
             LandlordRecord if found, None otherwise
         """
-        # In production, this would query the landlord_registry span
-        return LandlordRecord(
-            landlord_id="landlord_001",
-            name="Bay Area Properties LLC",
-            properties_count=23,
-            accepts_vouchers=True,
-            complaint_count=5,
-            violation_count=2,
-            avg_response_time="3-5 days",
-            community_rating=3.5,
-            voucher_friendly_rating=4.0,
-            notes=[
-                "Generally responsive to maintenance requests",
-                "Has accepted Section 8 vouchers consistently",
-                "Some tenants report slow response during holidays",
-            ],
-        )
+        # No landlord_registry span is wired yet: no record exists to return, and none is made up.
+        return None
 
     async def _handle_eviction_defense(
         self, request: SkillRequest, context: SkillContext
@@ -648,20 +576,20 @@ class HousingNavigatorChip(BaseSkillChip):
                 "4. Apply for emergency rental assistance if eligible\n\n"
             )
 
-        content += "**Emergency Resources:**\n"
-        for resource in resources:
-            content += f"- **{resource['name']}**: {resource['contact']}\n"
-            if resource.get("hours"):
-                content += f"  Hours: {resource['hours']}\n"
+        content += "**Help:**\n"
+        if resources:
+            for resource in resources:
+                content += f"- {resource['name']}: **{resource['contact']}**\n"
+        else:
+            content += (f"{not_connected('A local resource directory', 'I can\'t name a legal clinic or hotline near you')} "
+                        "Call 211 and ask for eviction legal help and emergency rental assistance.\n")
 
         return SkillResponse(
             content=content,
             success=True,
             data={"resources": resources, "stage": eviction_stage},
             suggestions=[
-                "Find free legal help",
-                "Apply for rental assistance",
-                "Know your court rights",
+                "Get tenant rights questions to ask locally",
             ],
         )
 
@@ -677,27 +605,10 @@ class HousingNavigatorChip(BaseSkillChip):
         Returns:
             List of eviction defense resources
         """
-        # In production, this would query the housing_database span
-        return [
-            {
-                "name": "Eviction Defense Hotline",
-                "contact": "1-800-EVICT-HELP",
-                "hours": "24/7",
-                "services": "Legal advice, court accompaniment",
-            },
-            {
-                "name": "Emergency Rental Assistance",
-                "contact": "Apply at rentrelief.org",
-                "hours": "Online 24/7",
-                "services": "Rent and utility payment assistance",
-            },
-            {
-                "name": "Tenant Rights Legal Clinic",
-                "contact": "tenantlaw@legalaid.org",
-                "hours": "M-F 9am-5pm",
-                "services": "Free legal representation",
-            },
-        ]
+        # Only the deployment's own lines: no housing_database span is wired yet, so no hotline or clinic is named.
+        named = [("eviction_legal_help", "Eviction legal help"), ("rental_assistance", "Emergency rental assistance"),
+                 ("tenant_union", "Your tenant union")]
+        return [{"name": label, "contact": self.contacts[key]} for key, label in named if self.contacts.get(key)]
 
     async def get_bdi_context(
         self,

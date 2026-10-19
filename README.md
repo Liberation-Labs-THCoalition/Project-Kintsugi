@@ -102,9 +102,14 @@ Raw Input → Extraction → Significance Scoring → Hybrid Retrieval
 - Spaced retrieval for important information
 - Per-organization isolation
 
-### 22 Skill Chips
+### 25 Skill Chips
 
-Domain-specific handlers with built-in ethical guardrails:
+Domain-specific handlers with built-in ethical guardrails. **What's real today:** most chips run on sample data until
+they're connected to an organization's own systems, and every response from one of those begins with a *Sample mode*
+notice. The community-aid chips that people may reach in an emergency (rapid response, crisis, housing, know your
+rights, food, mutual aid, redistribution, solidarity economy) and the bash executor say only what they did: nothing
+invented, nothing claimed sent, and only the contacts a deployment configures (else 211). See
+`kintsugi/skills/honesty.py`.
 
 | Domain | Skills |
 |--------|--------|
