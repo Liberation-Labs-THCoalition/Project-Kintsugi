@@ -9,13 +9,18 @@ Security Measures:
     - Import restrictions (whitelist approach)
     - Network access control
     - Filesystem access control
-    - Execution timeout (wall clock)
+    - A wait timeout: the caller stops waiting after max_execution_time
+
+Not enforced: stopping the plugin itself. The timeout ends the caller's wait and records a violation; it doesn't stop
+the plugin. A sync plugin's thread runs on to its end, and an async plugin that never awaits can't be timed out at all,
+because the event loop never gets the chance to fire the timer (Vera, 2026-10-19).
 
 Not enforced: memory and CPU limits. Plugin methods run in the host process, and an in-process limit can only be
 put on the whole process. The old code set RLIMIT_AS and RLIMIT_CPU on the host itself, which lowered the server's
 hard limits for good (an unprivileged process can't raise them back) and got the server SIGKILLed once its own
 lifetime CPU passed max_cpu_seconds (2026-10-19). max_memory_mb and max_cpu_seconds are kept on the policy for the
-day execution moves to a child process, where they can be applied safely; until then they're advisory.
+day execution moves to a child process, where they, and a timeout that really stops the plugin, can be applied
+safely; until then they're advisory.
 
 Example:
     from kintsugi.plugins.sandbox import PluginSandbox, SandboxPolicy
@@ -301,8 +306,8 @@ class RestrictedImporter:
 class PluginSandbox:
     """Sandboxed execution environment for plugins.
 
-    Runs plugin code with import restrictions and a wall-clock timeout. No memory or CPU limits are enforced:
-    plugin code runs in the host process (see the module docstring).
+    Runs plugin code with import restrictions and a wait timeout that doesn't stop the plugin. No memory or CPU limits
+    are enforced: plugin code runs in the host process (see the module docstring).
 
     Attributes:
         _policy: The security policy to enforce.
@@ -512,8 +517,9 @@ class PluginSandbox:
     ) -> SandboxExecutionResult:
         """Execute a plugin method in the sandbox.
 
-        Runs the specified method with the import restrictions and the wall-clock timeout in place. It sets no
-        resource limits: in-process they would apply to the host (see the module docstring).
+        Runs the specified method with the import restrictions in place, and stops waiting after the timeout (the
+        plugin itself isn't stopped). It sets no resource limits: in-process they would apply to the host (see the
+        module docstring).
 
         Args:
             plugin: The plugin to execute.
