@@ -816,9 +816,12 @@ async def test_the_example_tiers_stay_in_sample_mode_until_the_organization_give
     assert example.content.startswith(SAMPLE_NOTICE) and "Most popular" not in example.content
     own = MemberServicesChip(tiers={"member": MembershipTier(tier_id="t1", name="Member", annual_fee=20.0,
                                                              benefits=["A vote"], description="d")})
-    r = await own.handle(SkillRequest(intent="benefits_info", raw_input="b", entities={"tier": "member"}), _ctx())
+    try:                                     # the organization's own tier names, which the example's order doesn't know
+        r = await own.handle(SkillRequest(intent="benefits_info", raw_input="b", entities={"tier": "member"}), _ctx())
+    except Exception as e:
+        pytest.fail(f"the organization's own tiers crashed the chip: {e!r}")
     assert not r.content.startswith(SAMPLE_NOTICE) and "$20.00" in r.content
-    assert not MemberServicesChip.simulated is False                   # the class default is still sample
+    assert MemberServicesChip.simulated is True                        # the class default is still sample
 
 
 # ---- donor stewardship: the repairs ------------------------------------------------------------------------------------
@@ -916,7 +919,7 @@ async def test_no_grant_deadline_or_pipeline_is_invented():
     d = await _grants("grant_deadline")
     assert d.data["deadlines"] == [] and "isn't connected" in d.content
     r = await _grants("grant_report")
-    assert r.data["pipeline"] is None and "75,000" not in r.content
+    assert "pipeline" in r.data and r.data["pipeline"] is None and "75,000" not in r.content
 
 
 @pytest.mark.asyncio
