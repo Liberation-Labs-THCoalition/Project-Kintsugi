@@ -329,3 +329,42 @@ def test_a_bystander_doesnt_see_what_an_executed_action_returned(make_headers):
     gate.record_result(item.id, {"content": "SECRET contact: 555-0100"}, org_id="org_a")
     seen = TestClient(app).get(f"/api/v1/consensus/{item.id}", headers=other_h).json()
     assert seen["result"] is None and "SECRET" not in json.dumps(seen)
+
+
+# ---- a key with no person: said every time it matters (Vera, 10-19) ------------------------------------------------
+
+def test_an_approval_from_a_key_with_no_person_says_so_and_a_named_one_doesnt(make_headers):
+    from fastapi.testclient import TestClient
+    from kintsugi.main import app
+    from kintsugi.security.api_keys import NO_PERSON_NOTE, get_key_store
+    store = get_key_store()
+    client = TestClient(app)
+    unnamed = make_headers("admin", "org_a", "unnamed-admin")
+    item = get_consensus_gate().submit("org_a", ConsentCategory.FINANCIAL, "t", {"x": 1}, requester="key:k-other")
+    r = client.post(f"/api/v1/consensus/{item.id}/approve", json={}, headers=unnamed)
+    assert r.status_code == 200 and r.json()["note"] == NO_PERSON_NOTE
+    named = make_headers("admin", "org_a", "named-admin")
+    rec = next(x for x in store.list() if x.label == "named-admin")
+    store.set_person(rec.id, "eli")
+    other = get_consensus_gate().submit("org_a", ConsentCategory.FINANCIAL, "t", {"x": 2}, requester="key:k-other")
+    r = client.post(f"/api/v1/consensus/{other.id}/approve", json={}, headers=named)    # first of two: nothing runs
+    assert r.status_code == 200 and "note" not in r.json()
+
+
+def test_admin_keys_without_person_are_listed_and_warned_about_at_startup(make_headers, caplog):
+    from fastapi.testclient import TestClient
+    from kintsugi.main import app
+    from kintsugi.security.api_keys import admin_keys_without_person, get_key_store
+    store = get_key_store()
+    store.create("org_a", "admin", "nobody-named")
+    named, _ = store.create("org_a", "admin", "someone-named", person="fran")
+    member, _ = store.create("org_a", "member", "a-member")
+    gone, _ = store.create("org_a", "admin", "revoked-admin")
+    store.revoke(gone.id)
+    listed = admin_keys_without_person()
+    assert any("nobody-named" in x for x in listed)
+    assert not any(lbl in " ".join(listed) for lbl in ("someone-named", "a-member", "revoked-admin"))
+    with caplog.at_level(logging.WARNING), TestClient(app):           # starting runs the lifespan
+        pass
+    assert any("admin keys with no person set" in r.getMessage() and "nobody-named" in r.getMessage()
+               for r in caplog.records)

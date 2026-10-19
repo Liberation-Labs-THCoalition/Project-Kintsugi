@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from kintsugi.api.auth import Principal, audit, require_principal
 from kintsugi.governance.consensus import ConsentStatus, get_consensus_gate
 from kintsugi.governance.consumer import execute_approved
-from kintsugi.security.api_keys import person_of
+from kintsugi.security.api_keys import NO_PERSON_NOTE, person_of
 
 router = APIRouter(prefix="/api/v1/consensus", tags=["consensus"])
 
@@ -60,6 +60,8 @@ async def approve(item_id: str, body: Decision, principal: Principal = Depends(r
     except ValueError as exc:
         raise HTTPException(status_code=404 if "No consent item" in str(exc) else 409, detail=str(exc))
     out = {"item": item.to_dict(), "result": None}
+    if _who(principal).startswith("key:") and person_of(_who(principal)) == _who(principal):
+        out["note"] = NO_PERSON_NOTE  # the gap shows every time it matters, not only at startup (Vera, 10-19)
     if item.status == ConsentStatus.APPROVED:
         out["result"] = await execute_approved(item_id, principal.org_id)
         out["item"] = gate.get_item(item_id, org_id=principal.org_id).to_dict()

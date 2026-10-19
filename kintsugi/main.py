@@ -46,6 +46,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.KINTSUGI_AUTH_DISABLED:
         logger.warning("KINTSUGI_AUTH_DISABLED is set: every request not from loopback will be refused")
 
+    # Admin keys that name no person: the two-person rule assumes each is a different person (Vera, 10-19).
+    try:
+        from kintsugi.security.api_keys import admin_keys_without_person
+
+        unnamed = admin_keys_without_person()
+        if unnamed:
+            logger.warning("admin keys with no person set (the two-person rule treats each as a different person; "
+                           "set one with `keys set-person`): %s", ", ".join(unnamed))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("key store check failed: %s", type(exc).__name__)
+
     # Approvals a crash or restart left unrun: run them inside their window, expire the rest.
     try:
         from kintsugi.governance.consumer import sweep_approved

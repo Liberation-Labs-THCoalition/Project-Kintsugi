@@ -199,7 +199,9 @@ class VolunteerCoordinatorChip(BaseSkillChip):
     consensus_when = {"volunteer_notify": "_asks_mass"}
     MASS_LIMIT = 10
     MASS_WINDOW_HOURS = 24
-    _notified = org_scoped(dict)          # sender (person_of) -> [(when, how many), ...], this org's alone
+    # sender (person_of) -> [(when, how many), ...], this org's alone. In memory: a crash or deploy resets the window.
+    # Persist it when the consent file next changes shape, not before (Vera, 10-19).
+    _notified = org_scoped(dict)
     consensus_unreachable = {
         "schedule_change_all": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }

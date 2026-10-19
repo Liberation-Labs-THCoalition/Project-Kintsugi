@@ -159,6 +159,16 @@ def person_of(identity: str) -> str:
     return identity
 
 
+NO_PERSON_NOTE = "approver's person isn't set; the two-person rule assumes distinct keys are distinct people"
+
+
+def admin_keys_without_person() -> list[str]:
+    """Live admin keys that name no person: for each, the two-person rule has to trust that it's a different person
+    from every other key (Vera, 10-19). Warned about at startup, by id and label, never the key."""
+    return [f"{r.id} ({r.label or 'no label'})" for r in get_key_store().list()
+            if r.role == "admin" and not r.revoked_at and not r.person]
+
+
 _store: KeyStore | None = None
 
 
