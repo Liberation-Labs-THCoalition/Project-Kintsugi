@@ -60,7 +60,6 @@ def _walk_strings(path: Path):
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
-    "volunteer_coordinator.py": "'Sent N notifications' when nothing is sent; invented roster",
     "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
     "member_services.py": "renewals 'processed', receipts and emails 'sent'; invented members and figures",
     "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
@@ -242,6 +241,7 @@ REAL_CHIPS = {
     "MutualAidCoordinatorChip": "real records; says nobody is notified and no contact details are shared (10-19)",
     "ResourceRedistributionChip": "real records; says pickups and partners are recorded, nobody told (10-19)",
     "SolidarityEconomyChip": "formation guidance and real networks; no invented co-op, balance, loan or cost (10-19)",
+    "VolunteerCoordinatorChip": "the deployment's roster and sender or none; sends nothing it can't, saves nothing (10-19)",
 }
 
 
@@ -712,3 +712,93 @@ async def test_a_warrant_at_the_door_with_no_agency_named_asks_and_shows_the_dif
     assert r.data["topic"] == "warrant_unclear" and r.data["rights_info"] is None
     assert "Is it ICE (immigration) or the police?" in r.content and "signed by a judge" in r.content
     assert "slide the warrant under the door" in r.content
+
+
+# ---- volunteer coordinator: the repairs --------------------------------------------------------------------------------
+
+def _roster(org_id):
+    from kintsugi.skills.core_ops.volunteer_coordinator import Volunteer
+    return [Volunteer(id="v1", name="Dee", email="dee@example.test", skills=["driving"], total_hours=12.0)]
+
+
+@pytest.mark.asyncio
+async def test_no_roster_lists_nobody_and_invents_nobody():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    r = await VolunteerCoordinatorChip().handle(SkillRequest(intent="volunteer_search", raw_input="s"), _ctx())
+    assert r.data["volunteers"] == [] and "isn't connected" in r.content and "Alice" not in r.content
+    h = await VolunteerCoordinatorChip().handle(SkillRequest(intent="volunteer_hours", raw_input="h"), _ctx())
+    assert "isn't connected" in h.content and "425" not in h.content
+
+
+@pytest.mark.asyncio
+async def test_without_a_sender_nothing_is_sent_or_counted_toward_the_limit():
+    from kintsugi.skills.base import org_scope
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    chip = VolunteerCoordinatorChip(roster=_roster)
+    r = await chip.handle(SkillRequest(intent="volunteer_notify", raw_input="n", entities={
+        "volunteer_ids": ["v1"], "message": "Shift moved"}), _ctx())
+    assert r.data["sent"] == 0 and r.data["reachable"] == 1 and "nothing was sent" in r.content
+    assert _claims_in(r.content) == []
+    with org_scope("org_h"):
+        assert chip._notified.get("key:k-h", []) == []
+
+
+@pytest.mark.asyncio
+async def test_with_a_sender_delivery_is_real_and_counted():
+    from kintsugi.skills.base import org_scope
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    delivered = []
+
+    async def sender(volunteer, channel, message):
+        delivered.append((volunteer.id, channel, message))
+        return True
+    chip = VolunteerCoordinatorChip(roster=_roster, sender=sender)
+    r = await chip.handle(SkillRequest(intent="volunteer_notify", raw_input="n", entities={
+        "volunteer_ids": ["v1"], "message": "Shift moved"}), _ctx())
+    assert r.data["sent"] == 1 and delivered == [("v1", "email", "Shift moved")]
+    with org_scope("org_h"):
+        assert sum(n for _, n in chip._notified["key:k-h"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_delivery_is_not_counted_as_sent():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+
+    async def refuses(volunteer, channel, message):
+        return False
+    r = await VolunteerCoordinatorChip(roster=_roster, sender=refuses).handle(SkillRequest(
+        intent="volunteer_notify", raw_input="n", entities={"volunteer_ids": ["v1"], "message": "m"}), _ctx())
+    assert r.data["sent"] == 0 and r.data["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_shift_is_a_draft_and_hours_are_not_recorded():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    chip = VolunteerCoordinatorChip(roster=_roster)
+    s = await chip.handle(SkillRequest(intent="volunteer_schedule", raw_input="s", entities={
+        "volunteer_id": "v1", "date": "2026-10-20", "start_time": "09:00", "end_time": "12:00"}), _ctx())
+    assert s.data["saved"] is False and s.content.startswith("Draft shift") and _claims_in(s.content) == []
+    h = await chip.handle(SkillRequest(intent="volunteer_hours", raw_input="h", entities={
+        "action": "log", "volunteer_id": "v1", "hours": 3}), _ctx())
+    assert h.data["recorded"] is False and "not been recorded" in h.content
+
+
+@pytest.mark.asyncio
+async def test_a_held_mass_notice_without_a_sender_says_approval_sends_nothing():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    held = await VolunteerCoordinatorChip(roster=_roster).handle(SkillRequest(
+        intent="volunteer_notify", raw_input="n", entities={"volunteer_ids": "all", "message": "m"}), _ctx())
+    assert held.metadata.get("held") and "approving this will not send anything" in held.content
+
+
+@pytest.mark.asyncio
+async def test_the_roster_is_asked_for_the_requests_own_org():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    asked = []
+
+    def roster(org_id):
+        asked.append(org_id)
+        return _roster(org_id)
+    await VolunteerCoordinatorChip(roster=roster).handle(SkillRequest(intent="volunteer_notify", raw_input="n",
+        entities={"volunteer_ids": ["v1"], "message": "m"}), _ctx())
+    assert asked and set(asked) == {"org_h"}
