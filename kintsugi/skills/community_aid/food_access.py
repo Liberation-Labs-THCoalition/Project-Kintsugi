@@ -40,6 +40,7 @@ from kintsugi.skills import (
     SkillRequest,
     SkillResponse,
 )
+from kintsugi.skills.base import consent_given
 
 
 class DietaryRestriction(str, Enum):
@@ -145,6 +146,14 @@ class FoodAccessChip(BaseSkillChip):
         SkillCapability.EXTERNAL_API,
     ]
     consensus_actions = ["approve_food_distribution", "partner_food_share"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"food_donate": "approve_food_distribution"}
+    consensus_when = {
+        "food_donate": lambda r: (r.entities.get("quantity") or 0) > 100,
+    }
+    consensus_unreachable = {
+        "partner_food_share": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["pantry_network", "snap_eligibility", "meal_scheduler", "inventory_system"]
 
     # SNAP income limits by household size (monthly, 2024 federal guidelines)
@@ -665,8 +674,9 @@ class FoodAccessChip(BaseSkillChip):
             content=content,
             success=True,
             data=result,
-            requires_consensus=True if result.get("large_donation") else False,
-            consensus_action="approve_food_distribution" if result.get("large_donation") else None,
+            requires_consensus=bool(result.get("large_donation")) and not consent_given(context),
+            consensus_action=("approve_food_distribution" if result.get("large_donation") and not consent_given(context)
+                              else None),
             suggestions=[
                 "Schedule recurring donation",
                 "Get donation receipt",

@@ -194,6 +194,14 @@ class ImpactAuditorChip(BaseSkillChip):
     ]
 
     consensus_actions = ["publish_report", "submit_to_funder"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"impact_report": "submit_to_funder"}
+    consensus_when = {
+        "impact_report": lambda r: r.entities.get("report_type") == "funder" and bool(r.entities.get("submit")),
+    }
+    consensus_unreachable = {
+        "publish_report": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["sdg_mapping", "gri_standards", "report_templates"]
 
     # SDG goal descriptions for mapping

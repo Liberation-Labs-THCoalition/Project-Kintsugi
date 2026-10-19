@@ -115,6 +115,15 @@ class MemberServicesChip(BaseSkillChip):
     ]
 
     consensus_actions = ["change_membership_tier", "process_refund", "bulk_communication"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"member_communicate": "bulk_communication"}
+    consensus_when = {
+        "member_communicate": lambda r: bool(r.entities.get("bulk", False)),
+    }
+    consensus_unreachable = {
+        "change_membership_tier": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "process_refund": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = ["membership_db", "payment_processor", "email_service"]
 

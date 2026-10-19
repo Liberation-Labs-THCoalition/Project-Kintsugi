@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "CHANGE-ME-in-production"  # not used for API auth (keys below); kept for older callers
     # Per-org API keys: hashes only, minted by `kintsugi keys create` (step 3).
     API_KEYS_FILE: str = "~/.kintsugi/api_keys.json"
+    # Actions waiting for, or given, consent: kept on disk so a restart neither approves nor forgets one.
+    CONSENT_FILE: str = "~/.kintsugi/consent.json"
     # Auth off is allowed only for local development: with it set, every request not from loopback is refused.
     KINTSUGI_AUTH_DISABLED: bool = False
     KINTSUGI_AUTH_DISABLED_ORG: str = "default"

@@ -218,6 +218,16 @@ class MutualAidCoordinatorChip(BaseSkillChip):
     ]
 
     consensus_actions = ["approve_high_value_request", "share_requester_info"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"match_request": "share_requester_info"}
+    consensus_when = {
+        "match_request": lambda r: bool(r.entities.get("confirm_match_id")),
+    }
+    consensus_unreachable = {
+        "approve_high_value_request": (
+            "no intent performs this yet: declared for a future one, so it can't happen ungated"
+        ),
+    }
 
     required_spans = [
         "needs_database",

@@ -45,6 +45,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import consent_given
 from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
@@ -199,6 +200,14 @@ class CommunityAssetMapperChip(BaseSkillChip):
     ]
 
     consensus_actions = ["publish_asset_map", "share_with_partner"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"asset_map": "publish_asset_map"}
+    consensus_when = {
+        "asset_map": lambda r: bool(r.entities.get("share_publicly", False)),
+    }
+    consensus_unreachable = {
+        "share_with_partner": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = [
         "geocoding_api",
@@ -351,7 +360,7 @@ class CommunityAssetMapperChip(BaseSkillChip):
             format: Output format (geojson, summary, list)
             share_publicly: Whether to publish publicly (requires consensus)
         """
-        if request.entities.get("share_publicly", False):
+        if request.entities.get("share_publicly", False) and not consent_given(context):
             return SkillResponse(
                 content="Publishing asset map publicly requires approval.",
                 success=True,

@@ -280,6 +280,16 @@ class SkillCapability(str, Enum):
 RESERVED_PARAMETERS = frozenset({"approved"})
 
 
+# Set on the context by BaseSkillChip's wrapper, and only there, once the approved replay's token is redeemed.
+CONSENT_REDEEMED = "_consent_redeemed"
+
+
+def consent_given(context) -> bool:
+    """Whether this call is the approved run of a held action. A handler that used to flag its act (or act, then
+    flag) checks this, so an approved run carries the act out instead of asking again."""
+    return (getattr(context, "metadata", None) or {}).get(CONSENT_REDEEMED) is True
+
+
 def is_shell_capable(chip) -> bool:
     """Whether a chip can run shell commands. Keyed on capability, not name: a renamed shell chip is still a shell
     (Vera, 2026-09-29)."""
@@ -439,6 +449,18 @@ class org_scoped:
         obj.__dict__.setdefault("_org_stores", {})[self._key(obj)] = value
 
 
+def _asks_for(cls, intent, request) -> bool:
+    """Whether this request asks for its intent's consensus action. With no predicate, every call does; a predicate
+    that fails counts as asking, so an error holds rather than runs."""
+    when = (cls.consensus_when or {}).get(intent)
+    if when is None:
+        return True
+    try:
+        return bool(when(request))
+    except Exception:
+        return True
+
+
 class BaseSkillChip(ABC):
     """Abstract base class for all skill chips.
 
@@ -499,6 +521,16 @@ class BaseSkillChip(ABC):
 
     # Actions that require consensus approval
     consensus_actions: list[str] = []
+    # Which intents are which consensus action: intent -> action. A mapped intent is held for consent before handle()
+    # runs. Intent names never equal action names, so this map is explicit, and a test dispatches every entry.
+    consensus_intents: dict[str, str] = {}
+    # Declared actions no intent reaches, each with the reason; a declared action is in one map or the other.
+    consensus_unreachable: dict[str, str] = {}
+    # Optional: action -> ConsentCategory value (default GENERAL, one approval; FINANCIAL and PII need two).
+    consensus_categories: dict[str, str] = {}
+    # Optional: intent -> predicate on the request, for an intent that asks for its act only sometimes (a campaign
+    # message vs its launch). It mirrors the chip's own condition, and is decided before the chip runs.
+    consensus_when: dict = {}
 
     # Capabilities this chip uses
     capabilities: list[SkillCapability] = []
@@ -517,6 +549,16 @@ class BaseSkillChip(ABC):
         @functools.wraps(handle)
         async def handle_in_org(self, request, context, *args, **kw):
             with org_scope(getattr(context, "org_id", None)):
+                # An intent the chip maps to a consensus action is held before the chip runs, on every path, unless
+                # this is the approved replay (kintsugi/governance/consumer.py; Vera's re-check, 2026-10-18).
+                intent = getattr(request, "intent", None)
+                action = (type(self).consensus_intents or {}).get(intent)
+                if action and _asks_for(type(self), intent, request):
+                    from kintsugi.governance import consumer
+                    token = (getattr(context, "metadata", None) or {}).get(consumer.CONSENT_TOKEN)
+                    if not consumer.redeem(token, self.name, request, context, action):
+                        return consumer.hold(self, request, context, action)
+                    context.metadata[CONSENT_REDEEMED] = True
                 return await handle(self, request, context, *args, **kw)
 
         handle_in_org._org_scoped = True

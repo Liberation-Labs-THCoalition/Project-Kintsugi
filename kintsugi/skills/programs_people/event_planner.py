@@ -119,6 +119,19 @@ class EventPlannerChip(BaseSkillChip):
     ]
 
     consensus_actions = ["finalize_event", "send_invitations", "commit_budget"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "finalize_event": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "send_invitations": (
+            "advisory: event_followup returns a drafted follow-up (nothing is sent or scheduled); its flag says "
+            "this needs approval, and no intent performs it"
+        ),
+        "commit_budget": (
+            "advisory: event_logistics returns a logistics plan; its flag says this needs approval, and no intent"
+            " performs it"
+        ),
+    }
 
     required_spans = ["calendar_api", "rsvp_system", "venue_booking", "accessibility_checker"]
 

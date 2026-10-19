@@ -43,6 +43,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.base import consent_given
 from kintsugi.skills.base import org_scoped  # records kept per organisation
 from kintsugi.skills import (
     BaseSkillChip,
@@ -201,6 +202,14 @@ class CrisisResponseChip(BaseSkillChip):
     ]
 
     consensus_actions = ["activate_emergency_protocol", "release_emergency_funds"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"crisis_alert": "activate_emergency_protocol"}
+    consensus_when = {
+        "crisis_alert": lambda r: r.entities.get("severity") == "critical",
+    }
+    consensus_unreachable = {
+        "release_emergency_funds": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = [
         "alert_system",
@@ -260,7 +269,7 @@ class CrisisResponseChip(BaseSkillChip):
         severity = CrisisSeverity(request.entities.get("severity", "medium"))
 
         # Critical severity requires emergency protocol consensus
-        if severity == CrisisSeverity.CRITICAL:
+        if severity == CrisisSeverity.CRITICAL and not consent_given(context):
             return SkillResponse(
                 content="CRITICAL alert requires emergency protocol activation approval.",
                 success=True,

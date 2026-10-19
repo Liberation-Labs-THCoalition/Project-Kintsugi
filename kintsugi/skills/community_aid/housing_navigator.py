@@ -145,6 +145,14 @@ class HousingNavigatorChip(BaseSkillChip):
         SkillCapability.PII_ACCESS,
     ]
     consensus_actions = ["submit_voucher_application", "share_tenant_data"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "submit_voucher_application": (
+            "no intent performs this yet: declared for a future one, so it can't happen ungated"
+        ),
+        "share_tenant_data": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
     required_spans = ["housing_database", "voucher_tracker", "landlord_registry", "hud_api"]
 
     # Fair Market Rent limits by bedroom count (sample, would come from HUD API)

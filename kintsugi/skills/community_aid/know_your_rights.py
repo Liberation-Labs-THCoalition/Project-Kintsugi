@@ -128,6 +128,16 @@ class KnowYourRightsChip(BaseSkillChip):
         SkillCapability.GENERATE_REPORTS,
     ]
     consensus_actions = ["schedule_legal_clinic", "distribute_legal_materials"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"legal_clinic": "schedule_legal_clinic"}
+    consensus_when = {
+        "legal_clinic": lambda r: r.entities.get("action", "find") == "schedule",
+    }
+    consensus_unreachable = {
+        "distribute_legal_materials": (
+            "no intent performs this yet: declared for a future one, so it can't happen ungated"
+        ),
+    }
     required_spans = ["legal_database", "clinic_scheduler", "translation_api"]
 
     # Supported languages for materials

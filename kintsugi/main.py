@@ -90,6 +90,7 @@ _route_modules = [
     "kintsugi.api.routes.skills",
     "kintsugi.api.routes.oracle",
     "kintsugi.api.routes.events",
+    "kintsugi.api.routes.consensus",
 ]
 
 for _mod_path in _route_modules:

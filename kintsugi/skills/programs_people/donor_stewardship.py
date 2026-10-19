@@ -119,6 +119,16 @@ class DonorStewardshipChip(BaseSkillChip):
     ]
 
     consensus_actions = ["send_acknowledgment", "update_donor_level", "share_donor_data"]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {}
+    consensus_unreachable = {
+        "send_acknowledgment": (
+            "advisory: donor_thank returns a drafted acknowledgment; its flag says this needs approval, and no "
+            "intent performs it"
+        ),
+        "update_donor_level": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "share_donor_data": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = ["crm_api", "email_service", "gift_tracking"]
 

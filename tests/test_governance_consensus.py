@@ -60,7 +60,6 @@ class TestConsensusConfig:
         cfg = ConsensusConfig()
         assert cfg.default_timeout_hours == 24.0
         assert cfg.escalation_after_hours == 48.0
-        assert cfg.auto_approve_categories == []
         assert cfg.approval_thresholds[ConsentCategory.FINANCIAL] == 2
         assert cfg.approval_thresholds[ConsentCategory.GENERAL] == 1
 
@@ -88,27 +87,18 @@ class TestConsensusGateSubmit:
         assert item.action_payload == {"key": "val"}
         assert item.priority == ConsensusPriority.MEDIUM
 
-    def test_submit_auto_approve(self):
-        cfg = ConsensusConfig(auto_approve_categories=[ConsentCategory.GENERAL])
-        gate = ConsensusGate(cfg)
-        item = gate.submit("org1", ConsentCategory.GENERAL, "auto", {})
-        assert item.status == ConsentStatus.APPROVED
-        assert item.resolved_by == "auto"
-        assert item.rationale == "Auto-approved by category policy."
-        assert item.resolved_at is not None
-
-    def test_submit_non_auto_category_stays_pending(self):
-        cfg = ConsensusConfig(auto_approve_categories=[ConsentCategory.GENERAL])
-        gate = ConsensusGate(cfg)
-        item = gate.submit("org1", ConsentCategory.FINANCIAL, "fin", {})
-        assert item.status == ConsentStatus.PENDING
+    def test_there_is_no_auto_approve(self):
+        # Vera's re-check, 2026-10-18: consent comes from people, never from a category switch.
+        with pytest.raises(TypeError):
+            ConsensusConfig(auto_approve_categories=[ConsentCategory.GENERAL])
+        assert not hasattr(ConsensusConfig(), "auto_approve_categories")
 
 
 class TestConsensusGateApprove:
     def test_single_approval_meets_threshold(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        result = gate.approve(item.id, "alice", "looks good")
+        result = gate.approve(item.id, "alice", "looks good", org_id="org1")
         assert result.status == ConsentStatus.APPROVED
         assert result.resolved_by == "alice"
         assert result.rationale == "looks good"
@@ -116,43 +106,43 @@ class TestConsensusGateApprove:
     def test_multi_approval_threshold(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.FINANCIAL, "t", {})
-        result = gate.approve(item.id, "alice")
+        result = gate.approve(item.id, "alice", org_id="org1")
         assert result.status == ConsentStatus.PENDING
-        result = gate.approve(item.id, "bob", "ok")
+        result = gate.approve(item.id, "bob", "ok", org_id="org1")
         assert result.status == ConsentStatus.APPROVED
         assert result.resolved_by == "bob"
 
     def test_approve_no_rationale_sets_none(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        result = gate.approve(item.id, "alice")
+        result = gate.approve(item.id, "alice", org_id="org1")
         assert result.rationale is None
 
     def test_approve_already_rejected_raises(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.reject(item.id, "alice")
+        gate.reject(item.id, "alice", org_id="org1")
         with pytest.raises(ValueError, match="terminal state"):
-            gate.approve(item.id, "bob")
+            gate.approve(item.id, "bob", org_id="org1")
 
     def test_approve_already_approved_raises(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.approve(item.id, "alice")
+        gate.approve(item.id, "alice", org_id="org1")
         with pytest.raises(ValueError, match="terminal state"):
-            gate.approve(item.id, "bob")
+            gate.approve(item.id, "bob", org_id="org1")
 
     def test_approve_unknown_id_raises(self):
         gate = ConsensusGate()
         with pytest.raises(ValueError, match="No consent item"):
-            gate.approve("nonexistent", "alice")
+            gate.approve("nonexistent", "alice", org_id="org1")
 
 
 class TestConsensusGateReject:
     def test_reject(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        result = gate.reject(item.id, "alice", "bad idea")
+        result = gate.reject(item.id, "alice", "bad idea", org_id="org1")
         assert result.status == ConsentStatus.REJECTED
         assert result.resolved_by == "alice"
         assert result.rationale == "bad idea"
@@ -160,20 +150,20 @@ class TestConsensusGateReject:
     def test_reject_no_rationale(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        result = gate.reject(item.id, "alice")
+        result = gate.reject(item.id, "alice", org_id="org1")
         assert result.rationale is None
 
     def test_reject_already_approved_raises(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.approve(item.id, "alice")
+        gate.approve(item.id, "alice", org_id="org1")
         with pytest.raises(ValueError, match="terminal state"):
-            gate.reject(item.id, "bob")
+            gate.reject(item.id, "bob", org_id="org1")
 
     def test_reject_unknown_id_raises(self):
         gate = ConsensusGate()
         with pytest.raises(ValueError, match="No consent item"):
-            gate.reject("nonexistent", "alice")
+            gate.reject("nonexistent", "alice", org_id="org1")
 
 
 class TestConsensusGateListPending:
@@ -182,8 +172,8 @@ class TestConsensusGateListPending:
         gate.submit("org1", ConsentCategory.GENERAL, "a", {})
         gate.submit("org2", ConsentCategory.GENERAL, "b", {})
         item_c = gate.submit("org1", ConsentCategory.GENERAL, "c", {})
-        gate.approve(item_c.id, "alice")
-        pending = gate.list_pending()
+        gate.approve(item_c.id, "alice", org_id="org1")
+        pending = gate.list_pending("org1") + gate.list_pending("org2")
         assert len(pending) == 2
 
     def test_list_pending_with_org_filter(self):
@@ -195,8 +185,8 @@ class TestConsensusGateListPending:
     def test_list_pending_includes_escalated(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "a", {})
-        gate.escalate(item.id)
-        assert len(gate.list_pending()) == 1
+        gate.escalate(item.id, org_id="org1")
+        assert len(gate.list_pending("org1")) == 1
 
 
 class TestConsensusGateGetItem:
@@ -224,7 +214,7 @@ class TestConsensusGateCheckExpired:
     def test_check_expired_skips_non_pending(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.approve(item.id, "alice")
+        gate.approve(item.id, "alice", org_id="org1")
         item.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
         assert gate.check_expired() == []
 
@@ -236,7 +226,7 @@ class TestConsensusGateCheckExpired:
     def test_check_expired_includes_escalated(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.escalate(item.id)
+        gate.escalate(item.id, org_id="org1")
         item.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
         expired = gate.check_expired()
         assert len(expired) == 1
@@ -246,34 +236,34 @@ class TestConsensusGateEscalate:
     def test_escalate_pending(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        result = gate.escalate(item.id)
+        result = gate.escalate(item.id, org_id="org1")
         assert result.status == ConsentStatus.ESCALATED
 
     def test_escalate_non_pending_raises(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.approve(item.id, "alice")
+        gate.approve(item.id, "alice", org_id="org1")
         with pytest.raises(ValueError, match="only PENDING"):
-            gate.escalate(item.id)
+            gate.escalate(item.id, org_id="org1")
 
     def test_escalate_already_escalated_raises(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.escalate(item.id)
+        gate.escalate(item.id, org_id="org1")
         with pytest.raises(ValueError, match="only PENDING"):
-            gate.escalate(item.id)
+            gate.escalate(item.id, org_id="org1")
 
     def test_escalate_unknown_id_raises(self):
         gate = ConsensusGate()
         with pytest.raises(ValueError, match="No consent item"):
-            gate.escalate("nonexistent")
+            gate.escalate("nonexistent", org_id="org1")
 
     def test_approve_escalated_item(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.GENERAL, "t", {})
-        gate.escalate(item.id)
+        gate.escalate(item.id, org_id="org1")
         # Escalated is not terminal, so approve should work
-        result = gate.approve(item.id, "alice")
+        result = gate.approve(item.id, "alice", org_id="org1")
         assert result.status == ConsentStatus.APPROVED
 
 
@@ -281,8 +271,8 @@ class TestDistinctApprovers:
     def test_same_approver_twice_does_not_meet_a_two_approval_threshold(self):
         gate = ConsensusGate()
         item = gate.submit("org1", ConsentCategory.FINANCIAL, "t", {})
-        gate.approve(item.id, "alice")
-        result = gate.approve(item.id, "alice")
+        gate.approve(item.id, "alice", org_id="org1")
+        result = gate.approve(item.id, "alice", org_id="org1")
         assert result.status == ConsentStatus.PENDING
-        result = gate.approve(item.id, "bob")
+        result = gate.approve(item.id, "bob", org_id="org1")
         assert result.status == ConsentStatus.APPROVED and result.resolved_by == "bob"

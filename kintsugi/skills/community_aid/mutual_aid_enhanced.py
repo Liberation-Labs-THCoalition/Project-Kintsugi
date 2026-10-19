@@ -115,6 +115,15 @@ class MutualAidEnhancedChip(BaseSkillChip):
         "modify_matching_weights",   # Algorithm changes need community input
         "expand_category_list",      # Adding new aid categories
     ]
+    # Consensus: which intents ask for which action, held before handle() runs (kintsugi/governance/consumer.py).
+    consensus_intents = {"match_request": "share_requester_info"}
+    consensus_when = {
+        "match_request": lambda r: bool(r.entities.get("need_id")) and bool(r.entities.get("offer_id")),
+    }
+    consensus_unreachable = {
+        "modify_matching_weights": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "expand_category_list": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+    }
 
     required_spans = [
         "needs_database",
