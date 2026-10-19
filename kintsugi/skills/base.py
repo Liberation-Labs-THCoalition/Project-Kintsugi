@@ -461,6 +461,20 @@ class org_scoped:
         obj.__dict__.setdefault("_org_stores", {})[self._key(obj)] = value
 
 
+def _mark_sample(chip, intent, response):
+    """A sample-data chip's response says so before anything else, and carries simulated=True in data and metadata,
+    so neither a person nor a program mistakes placeholders for the organization's records."""
+    if not isinstance(response, SkillResponse) or not type(chip).simulated or intent in type(chip).real_intents:
+        return response
+    if (response.metadata or {}).get("simulated"):
+        return response  # already marked (a chip whose handle() calls super().handle() is wrapped twice)
+    from kintsugi.skills.honesty import SAMPLE_NOTICE
+    response.content = f"{SAMPLE_NOTICE}\n\n{response.content}"
+    response.data = {**(response.data or {}), "simulated": True}
+    response.metadata = {**(response.metadata or {}), "simulated": True}
+    return response
+
+
 def _asks_for(chip, intent, request, context) -> bool:
     """Whether this request asks for its intent's consensus action. With no predicate, every call does; a predicate
     that fails counts as asking, so an error holds rather than runs. A predicate given as a method name is called as
@@ -550,6 +564,20 @@ class BaseSkillChip(ABC):
     # instead of a function is called as self.method(request, context).
     consensus_when: dict = {}
 
+    # Honesty (kintsugi/skills/honesty.py). A chip runs on sample data until it is connected to the organization's own
+    # systems, and every response says so: the wrapper marks it before anyone reads it. A chip sets simulated = False
+    # only when every intent is backed by real work; real_intents lists the ones that are, in a chip that is otherwise
+    # sample data. Tight by default: a new chip is marked until someone checks it.
+    simulated: bool = True
+    real_intents: frozenset = frozenset()
+
+    def while_held(self, action: str) -> str:
+        """What the person needs to know now, while their request waits for approval: added to the hold message.
+
+        A chip whose action can't reach anyone yet says so here, so nobody waits on an approval that will do nothing
+        (a raid report, a bail request). Empty by default."""
+        return ""
+
     # Capabilities this chip uses
     capabilities: list[SkillCapability] = []
 
@@ -582,7 +610,7 @@ class BaseSkillChip(ABC):
                         if not consumer.redeem(token, self.name, request, context, action):
                             return consumer.hold(self, request, context, action)
                         context.metadata[CONSENT_REDEEMED] = token
-                return await handle(self, request, context, *args, **kw)
+                return _mark_sample(self, intent, await handle(self, request, context, *args, **kw))
 
         handle_in_org._org_scoped = True
         cls.handle = handle_in_org

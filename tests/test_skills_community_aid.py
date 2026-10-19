@@ -1368,7 +1368,8 @@ class TestRapidResponseChip:
         # Held for consent before anything is sent (Vera's re-check, 2026-10-18: it used to alert, then flag)
         assert response.success and response.requires_consensus and response.metadata.get("held")
         assert response.consensus_action == "activate_rapid_response" and "consent_id" in response.data
-        # Once approved, it runs: the alert is created
+        # Once approved, it runs, and says plainly that nobody was alerted: no alert network is connected yet
+        # (kintsugi/skills/honesty.py; until 10-19 it claimed 15 responders notified and observers dispatched).
         from kintsugi.governance import consumer
         from kintsugi.governance.consensus import get_consensus_gate
         get_consensus_gate().approve(response.data["consent_id"], "key:k-admin", org_id=context.org_id)
@@ -1377,7 +1378,8 @@ class TestRapidResponseChip:
             def get(self, name):
                 return rapid_response_chip
         result = await consumer.execute_approved(response.data["consent_id"], context.org_id, _One())
-        assert result["success"] and "alert_id" in result["data"]
+        assert result["success"] and result["data"]["sent"] is False and result["data"]["responders_notified"] == 0
+        assert "nobody has been alerted" in result["content"]
 
     @pytest.mark.asyncio
     async def test_privacy_security_in_response(

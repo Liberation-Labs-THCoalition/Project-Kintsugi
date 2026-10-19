@@ -21,6 +21,7 @@ class Ledger(BaseSkillChip):
     name = "test_consensus_ledger"
     description = "a test chip that pays out"
     domain = SkillDomain.OPERATIONS
+    simulated = False  # a test fixture whose responses are exactly what it did
     consensus_actions = ["disburse_funds"]
     consensus_intents = {"pay_out": "disburse_funds"}
 
@@ -296,9 +297,10 @@ async def test_a_raid_alert_notifies_nobody_until_approved():
     chip = RapidResponseChip()
     held = await chip.handle(SkillRequest(intent="raid_alert", raw_input="raid", entities={
         "general_area": "Downtown"}), ctx())
-    assert "Responders Notified" not in held.content and held.metadata.get("held")
+    assert "nobody has been alerted" not in held.content and held.metadata.get("held")
     result = await _approve_and_run(chip, held)
-    assert "Responders Notified" in result["content"]
+    # The approved run is the chip's own step; with no alert network connected, it says nobody was alerted.
+    assert "nobody has been alerted" in result["content"] and result["data"]["sent"] is False
 
 
 @pytest.mark.asyncio

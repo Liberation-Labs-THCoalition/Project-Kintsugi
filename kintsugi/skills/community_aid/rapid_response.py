@@ -16,11 +16,15 @@ location data is NOT logged. All communications should use encrypted
 channels when possible.
 
 Intents handled:
-- raid_alert: Send alerts about ICE or police activity
-- bail_request: Request bail fund support
-- legal_hotline: Connect to emergency legal hotline
-- safe_location: Find safe locations during emergencies
+- raid_alert: Report ICE or police activity (held for approval; sends through an alert network once one is connected)
+- bail_request: Ask for bail fund support (held for two approvers; reaches a bail fund once one is connected)
+- legal_hotline: Give the deployment's legal hotline
+- safe_location: Point to the deployment's safe-location line (never addresses)
 - response_debrief: Conduct post-response debriefs
+
+None of its spans is wired yet. Until one is, it says plainly that nobody was alerted and nothing was sent, gives only
+the lines a deployment configured (RapidResponseChip(contacts={...})), and otherwise points to 211. It invents no
+number, place, count or promise (kintsugi/skills/honesty.py).
 
 Example:
     chip = RapidResponseChip()
@@ -45,6 +49,7 @@ from kintsugi.skills import (
     SkillResponse,
 )
 from kintsugi.skills.base import consent_given
+from kintsugi.skills.honesty import NOBODY_CONTACTED, not_connected
 
 
 class AlertType(str, Enum):
@@ -86,6 +91,7 @@ class RapidAlert:
     verified: bool
     responders_notified: int
     active: bool = True
+    sent: bool = False  # True only when a connected alert network took it
 
 
 @dataclass
@@ -172,11 +178,43 @@ class RapidResponseChip(BaseSkillChip):
     consensus_categories = {"activate_rapid_response": "EXTERNAL_COMMS", "release_bail_funds": "FINANCIAL"}
     consensus_unreachable = {
         "share_location_alert": (
-            "advisory: safe_location returns general areas and a hotline, never addresses; its flag says this "
-            "needs approval, and no intent performs it"
+            "advisory: safe_location returns a configured line, never addresses; its flag says this needs approval, "
+            "and no intent performs it"
         ),
     }
     required_spans = ["alert_network", "bail_fund", "legal_hotline", "safe_location_db"]
+    # Honest without its spans (kintsugi/skills/honesty.py): with nothing connected it says nobody was alerted, gives
+    # only the lines a deployment configured, and invents no number, place or promise.
+    simulated = False
+
+    # Where to send someone when nothing is connected. US-wide (211) and safe to say during a raid: no police number.
+    NO_LINE = "If you don't know one, call 211 and ask for immigrant legal services or a bail fund."
+    RIGHTS = (
+        "**Your rights (US):**\n"
+        "- You have the right to remain silent\n"
+        "- You have the right to speak to a lawyer\n"
+        "- Do not sign anything you don't understand\n"
+    )
+
+    def __init__(self, contacts: dict[str, str] | None = None) -> None:
+        super().__init__()
+        # The deployment's own lines: rapid_response_hotline, legal_hotline, bail_fund, safe_location_line. A missing
+        # one is said to be missing, never filled in.
+        self.contacts = dict(contacts or {})
+
+    def _line(self, key: str, what: str) -> str:
+        number = self.contacts.get(key)
+        return f"Contact {what} directly: **{number}**." if number else f"Contact {what} directly. {self.NO_LINE}"
+
+    def while_held(self, action: str) -> str:
+        if action == "activate_rapid_response":
+            return (f"{not_connected('A rapid response network', 'approving this will not alert anyone')} "
+                    f"If people need help now, don't wait. "
+                    f"{self._line('rapid_response_hotline', 'your rapid response hotline')}")
+        if action == "release_bail_funds":
+            return (f"{not_connected('A bail fund', 'approving this will not move money or reach a coordinator')} "
+                    f"{self._line('bail_fund', 'your local bail fund')}")
+        return ""
 
     # Security notice included in relevant responses
     SECURITY_NOTICE = (
@@ -239,36 +277,32 @@ class RapidResponseChip(BaseSkillChip):
             verified=verified,
         )
 
-        content = "**RAPID RESPONSE ALERT CREATED**\n\n"
-        content += f"Alert ID: {alert.alert_id}\n"
-        content += f"Type: {alert.alert_type.value.replace('_', ' ').upper()}\n"
-        content += f"Urgency: {alert.urgency.value.upper()}\n"
-        content += f"Area: {alert.general_area}\n"
-        content += f"Verified: {'Yes' if alert.verified else 'Unverified - seeking confirmation'}\n"
-        content += f"Responders Notified: {alert.responders_notified}\n\n"
-
-        if alert.urgency in [UrgencyLevel.CRITICAL, UrgencyLevel.URGENT]:
-            content += "**IMMEDIATE ACTIONS:**\n"
-            content += "- Rapid response team has been alerted\n"
-            content += "- Legal observers are being dispatched\n"
-            content += "- Know-your-rights information being distributed\n\n"
-
+        content = "**Raid report: nobody has been alerted.**\n\n"
+        content += (f"{not_connected('A rapid response network', 'this report has not reached any responders or legal observers')} "
+                    f"{NOBODY_CONTACTED}\n\n")
+        content += f"Type: {alert.alert_type.value.replace('_', ' ')}. Urgency: {alert.urgency.value}. Area: {alert.general_area}.\n\n"
+        content += "**Do this now:**\n"
+        content += f"- {self._line('rapid_response_hotline', 'your rapid response hotline')}\n"
+        content += "- Share only general areas, never addresses or names, in unsecured channels.\n\n"
+        content += self.RIGHTS
         content += f"\n{self.SECURITY_NOTICE}"
 
         return SkillResponse(
             content=content,
             success=True,
             data={
-                "alert_id": alert.alert_id,
+                "sent": alert.sent,
+                "connected": False,
                 "responders_notified": alert.responders_notified,
-                "status": "active",
+                "type": alert.alert_type.value,
+                "urgency": alert.urgency.value,
             },
             requires_consensus=not consent_given(context),       # the approved run carries it out
             consensus_action=None if consent_given(context) else "activate_rapid_response",
             suggestions=[
-                "Update alert status",
-                "Request additional responders",
                 "Connect to legal hotline",
+                "Find safe locations",
+                "Get know-your-rights info",
             ],
         )
 
@@ -295,8 +329,8 @@ class RapidResponseChip(BaseSkillChip):
         Returns:
             Created alert object
         """
-        # In production, this would interact with alert_network span
-        # using encrypted channels
+        # Nothing is connected: no alert network span is wired yet, so nothing is sent and nobody is counted. When one
+        # is, it sends here and sets sent=True and the real count.
 
         try:
             alert_type_enum = AlertType(alert_type)
@@ -309,15 +343,16 @@ class RapidResponseChip(BaseSkillChip):
             urgency_enum = UrgencyLevel.URGENT
 
         return RapidAlert(
-            alert_id=f"ALERT-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            alert_id="",
             alert_type=alert_type_enum,
             urgency=urgency_enum,
             description=description,
             general_area=general_area or "Area not specified",
             timestamp=datetime.now(timezone.utc),
             verified=verified,
-            responders_notified=15,  # Would be actual count in production
-            active=True,
+            responders_notified=0,
+            active=False,
+            sent=False,
         )
 
     async def _handle_bail_request(
@@ -342,24 +377,14 @@ class RapidResponseChip(BaseSkillChip):
             case_type=case_type,
         )
 
-        content = "**BAIL FUND REQUEST**\n\n"
-        content += f"Request ID: {result['request_id']}\n"
-        content += f"Status: {result['status']}\n"
-
-        if result.get("next_steps"):
-            content += "\n**Next Steps:**\n"
-            for step in result["next_steps"]:
-                content += f"- {step}\n"
-
-        content += "\n**Important Information:**\n"
-        content += "- A bail fund coordinator will contact you\n"
-        content += "- Have case number and detention facility info ready\n"
-        content += "- All information is kept confidential\n"
-
-        if urgency == "critical":
-            content += "\n**URGENT:** This request has been flagged as critical. "
-            content += "Emergency protocols are in effect.\n"
-
+        content = "**Bail request: it hasn't reached anyone.**\n\n"
+        content += (f"{not_connected('A bail fund', 'no coordinator has been told and no money can move')} "
+                    f"{NOBODY_CONTACTED}\n\n")
+        content += "**Do this now:**\n"
+        content += f"- {self._line('bail_fund', 'your local bail fund')}\n"
+        content += "\n**Have ready:**\n"
+        for item in result["have_ready"]:
+            content += f"- {item}\n"
         content += f"\n{self.SECURITY_NOTICE}"
 
         return SkillResponse(
@@ -369,9 +394,8 @@ class RapidResponseChip(BaseSkillChip):
             requires_consensus=not consent_given(context),       # the approved run carries it out
             consensus_action=None if consent_given(context) else "release_bail_funds",
             suggestions=[
-                "Check request status",
-                "Contact bail fund directly",
                 "Get legal hotline number",
+                "Get know-your-rights info",
             ],
         )
 
@@ -394,18 +418,17 @@ class RapidResponseChip(BaseSkillChip):
         Returns:
             Bail request result
         """
-        # In production, this would interact with bail_fund span
+        # Nothing is connected: no bail fund span is wired yet, so nothing is submitted and no money moves.
         return {
-            "request_id": f"BAIL-{datetime.now().strftime('%Y%m%d%H%M')}",
-            "status": "Received - Under Review",
+            "sent": False,
+            "connected": False,
             "urgency": urgency,
-            "next_steps": [
-                "Bail fund coordinator will call within 2 hours",
-                "Gather detention facility information",
-                "Have case/booking number ready",
-                "Identify an emergency contact",
+            "have_ready": [
+                "The case or booking number",
+                "The name of the detention facility",
+                "An emergency contact",
             ],
-            "hotline": "Contact information provided via secure channel",
+            "bail_fund_line": self.contacts.get("bail_fund"),
         }
 
     async def _handle_legal_hotline(
@@ -430,30 +453,16 @@ class RapidResponseChip(BaseSkillChip):
             language=language,
         )
 
-        content = "**EMERGENCY LEGAL HOTLINE**\n\n"
-
-        if hotline["available"]:
-            content += f"**Hotline: {hotline['number']}**\n"
-            content += f"Hours: {hotline['hours']}\n"
-            content += f"Languages: {', '.join(hotline['languages'])}\n\n"
-
-            if urgency == "emergency":
-                content += "**EMERGENCY:** Your call will be prioritized.\n"
-                content += "When connected, say 'URGENT MATTER'\n\n"
-
-            content += "**What to Have Ready:**\n"
-            for item in hotline["prepare"]:
-                content += f"- {item}\n"
-
-            content += "\n**Remember:**\n"
-            content += "- You have the right to remain silent\n"
-            content += "- You have the right to an attorney\n"
-            content += "- Do not sign anything you don't understand\n"
+        content = "**Legal hotline**\n\n"
+        if hotline["number"]:
+            content += f"Your organization's legal hotline: **{hotline['number']}**\n\n"
         else:
-            content += "Hotline is currently outside operating hours.\n\n"
-            content += "**Alternative Resources:**\n"
-            for alt in hotline["alternatives"]:
-                content += f"- {alt['name']}: {alt['contact']}\n"
+            content += (f"{not_connected('A legal hotline', 'I have no number to give you')} "
+                        f"Contact a legal aid or immigrant rights organization you trust. {self.NO_LINE}\n\n")
+        content += "**Have ready when you call:**\n"
+        for item in hotline["prepare"]:
+            content += f"- {item}\n"
+        content += "\n" + self.RIGHTS
 
         return SkillResponse(
             content=content,
@@ -461,8 +470,7 @@ class RapidResponseChip(BaseSkillChip):
             data=hotline,
             suggestions=[
                 "Get know-your-rights info",
-                "Find legal aid near me",
-                "Request interpreter",
+                "Find safe locations",
             ],
         )
 
@@ -482,23 +490,16 @@ class RapidResponseChip(BaseSkillChip):
         Returns:
             Hotline connection information
         """
-        # In production, this would check real-time availability
-        # via legal_hotline span
+        # Only the deployment's own line: no legal_hotline span is wired yet, so nothing about hours, languages or wait
+        # times is known, and none is claimed.
         return {
-            "available": True,
-            "number": "1-800-LEGAL-NOW",
-            "hours": "24/7 for emergencies, 8am-10pm standard",
-            "languages": ["English", "Spanish", "Mandarin", "Vietnamese", "Korean"],
-            "wait_time": "Under 5 minutes" if urgency == "emergency" else "10-15 minutes",
+            "number": self.contacts.get("legal_hotline"),
+            "connected": False,
             "prepare": [
-                "Location of person needing help",
+                "Where the person needing help is (a general area is enough to start)",
                 "Any case or booking numbers",
-                "Name of detention facility if applicable",
-                "Brief description of situation",
-            ],
-            "alternatives": [
-                {"name": "Immigration Hotline", "contact": "1-800-IMM-HELP"},
-                {"name": "ACLU", "contact": "aclu.org/contact"},
+                "The name of the detention facility, if there is one",
+                "A short description of what happened",
             ],
         }
 
@@ -528,29 +529,14 @@ class RapidResponseChip(BaseSkillChip):
             language=language,
         )
 
-        content = "**SAFE LOCATION RESOURCES**\n\n"
-        content += (
-            "*For security reasons, specific addresses are provided only "
-            "through secure channels after identity verification.*\n\n"
-        )
-
-        if locations:
-            content += f"**{len(locations)} Safe Locations Available**\n\n"
-            for loc in locations:
-                content += f"**{loc.location_type.title()} - {loc.general_area}**\n"
-                content += f"- Services: {', '.join(loc.services)}\n"
-                content += f"- Languages: {', '.join(loc.languages)}\n"
-                content += f"- Hours: {loc.hours}\n"
-                content += f"- To get address: {loc.contact_method}\n\n"
+        content = "**Safe locations**\n\n"
+        content += "*Specific addresses are never shared here: only through a secure channel, by people you trust.*\n\n"
+        line = self.contacts.get("safe_location_line")
+        if line:
+            content += f"To find a safe place, call your organization's line: **{line}**.\n\n"
         else:
-            content += "No matching safe locations currently available.\n"
-            content += "Please contact the hotline for emergency assistance.\n"
-
-        content += "**How to Access:**\n"
-        content += "1. Call the secure hotline\n"
-        content += "2. Provide your verification code (if you have one)\n"
-        content += "3. Coordinator will provide address via encrypted channel\n\n"
-
+            content += (f"{not_connected('A safe-location directory', 'I can\'t list safe places')} "
+                        f"Contact your rapid response network or a local organization you trust. {self.NO_LINE}\n\n")
         content += f"{self.SECURITY_NOTICE}"
 
         return SkillResponse(
@@ -558,14 +544,14 @@ class RapidResponseChip(BaseSkillChip):
             success=True,
             data={
                 "locations_available": len(locations),
-                "contact_method": "Secure hotline",
+                "connected": False,
+                "safe_location_line": line,
             },
             requires_consensus=True,
             consensus_action="share_location_alert",
             suggestions=[
-                "Call secure hotline",
-                "Get verification code",
-                "Request escort to location",
+                "Connect to legal hotline",
+                "Get know-your-rights info",
             ],
         )
 
@@ -589,28 +575,8 @@ class RapidResponseChip(BaseSkillChip):
         Returns:
             List of safe location options (without specific addresses)
         """
-        # In production, this would query safe_location_db span
-        # with strict access controls
-        return [
-            SafeLocation(
-                location_id="safe_001",
-                location_type="sanctuary",
-                general_area="East Bay",
-                services=["shelter", "legal_consultation", "food"],
-                languages=["English", "Spanish"],
-                hours="24/7",
-                contact_method="Call hotline with code HAVEN",
-            ),
-            SafeLocation(
-                location_id="safe_002",
-                location_type="legal_aid",
-                general_area="Downtown",
-                services=["legal_consultation", "document_help", "translation"],
-                languages=["English", "Spanish", "Mandarin"],
-                hours="9am-8pm M-Sat",
-                contact_method="Call hotline with code SHIELD",
-            ),
-        ]
+        # No safe_location_db span is wired yet, so there are no places to list, and none is made up.
+        return []
 
     async def _handle_debrief(
         self, request: SkillRequest, context: SkillContext
@@ -644,8 +610,8 @@ class RapidResponseChip(BaseSkillChip):
         for guideline in debrief["documentation_guidelines"]:
             content += f"- {guideline}\n"
 
-        content += "\n**Support Resources:**\n"
-        content += "Rapid response work can be stressful. Resources available:\n"
+        content += "\n**Support:**\n"
+        content += "Rapid response work can be stressful. Support worth arranging, if your network doesn't have it yet:\n"
         for resource in debrief["support_resources"]:
             content += f"- {resource}\n"
 
@@ -656,9 +622,7 @@ class RapidResponseChip(BaseSkillChip):
             success=True,
             data=debrief,
             suggestions=[
-                "Submit debrief notes",
-                "Request support services",
-                "Update training materials",
+                "Get know-your-rights info",
             ],
         )
 
@@ -696,10 +660,10 @@ class RapidResponseChip(BaseSkillChip):
                 "Highlight successful tactics for training",
             ],
             "support_resources": [
-                "Responder support hotline",
+                "A support line for responders",
                 "Community care circles",
                 "Mental health resources",
-                "Peer support network",
+                "Peer support",
             ],
         }
 
