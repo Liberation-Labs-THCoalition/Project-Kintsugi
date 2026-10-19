@@ -65,10 +65,7 @@ PENDING_REPAIR: dict[str, str] = {
     "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
     "member_services.py": "renewals 'processed', receipts and emails 'sent'; invented members and figures",
     "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
-    "mutual_aid_coordinator.py": "'We'll notify you' with no notification path",
     "board_liaison.py": "invented minutes, motions, votes, compliance status and board report",
-    "resource_redistribution.py": "'We'll alert partners' with no alerting",
-    "mutual_aid_enhanced.py": "fallback 'posted' claims; the shield refuses 'rice' and 'notice'",
     "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
 }
 
@@ -241,6 +238,9 @@ REAL_CHIPS = {
     "HousingNavigatorChip": "lists nothing it can't look up; tenant law as questions to ask locally (10-19)",
     "KnowYourRightsChip": "US-wide rights for police and immigration only; English said plainly; no invented org (10-19)",
     "FoodAccessChip": "lists no invented pantry or meal; no SNAP verdict from stale limits; donations not recorded, said so (10-19)",
+    "MutualAidEnhancedChip": "never refuses a person for naming a fear; says nothing was posted without its core (10-19)",
+    "MutualAidCoordinatorChip": "real records; says nobody is notified and no contact details are shared (10-19)",
+    "ResourceRedistributionChip": "real records; says pickups and partners are recorded, nobody told (10-19)",
 }
 
 
@@ -555,3 +555,61 @@ async def test_a_donation_is_not_recorded_and_says_so():
     assert "No pickup has been scheduled" in r.content and "Donation ID" not in r.content
     held = await _food("food_donate", quantity=500)
     assert held.metadata.get("held") and "approving this records nothing" in held.content
+
+
+# ---- mutual aid (enhanced): the shield and the fallbacks ---------------------------------------------------------------
+
+async def _mae(raw, intent="need_post", **entities):
+    from kintsugi.skills.community_aid.mutual_aid_enhanced import MutualAidEnhancedChip
+    return await MutualAidEnhancedChip().handle(SkillRequest(intent=intent, raw_input=raw, entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_the_shield_never_refuses_rice_notices_or_a_person_afraid_of_ice():
+    for raw in ("I need rice and beans", "my eviction notice came", "help with my office move", "any advice?"):
+        r = await _mae(raw)
+        assert r.success and "shield_commitment" not in r.data, raw
+    afraid = await _mae("I'm scared ICE will come, I need a place to stay")
+    assert afraid.success and afraid.data["shield_commitment"] is True
+    assert afraid.content.startswith("This group's guidelines rule out contacting immigration enforcement")
+    asked = await _mae("do you do a background check?")
+    assert asked.success and "background checks" in asked.content
+
+
+@pytest.mark.asyncio
+async def test_without_its_core_nothing_is_claimed_posted_or_reviewed():
+    need = await _mae("I need groceries", category="food")
+    assert need.data["posted"] is False and _claims_in(need.content) == [] and "We'll notify" not in need.content
+    offer = await _mae("I can drive people", intent="offer_post")
+    assert offer.data["posted"] is False and "has been posted" not in offer.content
+    match = await _mae("match these", intent="match_request")
+    assert match.data["recorded"] is False and "coordinator will review" not in match.content
+
+
+@pytest.mark.asyncio
+async def test_the_notification_bridge_reports_nothing_sent():
+    from kintsugi.skills.community_aid.mutual_aid_enhanced import MutualAidEnhancedChip
+    assert await MutualAidEnhancedChip()._kintsugi_notify("someone-123", "hello") is False
+
+
+# ---- mutual aid coordinator and redistribution: the repairs ------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_an_unmatched_need_is_not_promised_a_notification():
+    from kintsugi.skills.community_aid.mutual_aid_coordinator import MutualAidCoordinatorChip
+    r = await MutualAidCoordinatorChip().handle(SkillRequest(intent="need_post", raw_input="n", entities={
+        "category": "housing", "description": "A room", "location": "Arcata"}), _ctx())
+    assert r.data["potential_matches"] == 0
+    assert all("We'll notify" not in s for s in r.suggestions) and any("nobody is notified" in s for s in r.suggestions)
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_pickup_says_nobody_has_been_told():
+    from kintsugi.skills.community_aid.resource_redistribution import ResourceRedistributionChip
+    chip = ResourceRedistributionChip()
+    s = await chip.handle(SkillRequest(intent="surplus_report", raw_input="s", entities={
+        "resource_type": "shelf_stable", "quantity": 10, "unit": "boxes", "location": "Arcata"}), _ctx())
+    assert all("We'll alert" not in x for x in s.suggestions)
+    p = await chip.handle(SkillRequest(intent="pickup_schedule", raw_input="p", entities={
+        "surplus_id": s.data["surplus_id"], "delivery_location": "Eureka"}), _ctx())
+    assert p.success and "Nobody has been told" in p.content and _claims_in(p.content) == []

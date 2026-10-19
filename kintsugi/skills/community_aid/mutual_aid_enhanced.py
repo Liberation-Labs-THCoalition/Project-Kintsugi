@@ -34,10 +34,12 @@ Date: 2026-04-04
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from kintsugi.skills.base import org_scoped  # engines kept per organisation
+from kintsugi.skills.honesty import US_REFERRALS, not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -78,6 +80,13 @@ except ImportError:
         "Install from /home/asdf/mutual-aid-coordinator or symlink core/ as mutual_aid_core. "
         "Falling back to built-in Kintsugi handlers."
     )
+
+
+# The mutual_aid VALUES template's shield patterns (kintsugi/config/templates/mutual_aid.json), as whole words.
+_SHIELD = [re.compile(r"(?i)\b(ice|immigration.?enforcement|police.?report)\b"),
+           re.compile(r"(?i)\b(credit.?check|background.?check|means.?test)\b")]
+SHIELD_COMMITMENT = ("This group's guidelines rule out contacting immigration enforcement or police, and running credit "
+                     "checks, background checks or means tests. Nothing here is sent to anyone.")
 
 
 class MutualAidEnhancedChip(BaseSkillChip):
@@ -133,6 +142,9 @@ class MutualAidEnhancedChip(BaseSkillChip):
         "matching_engine",
         "notification_service",
     ]
+    # Honest without its spans (kintsugi/skills/honesty.py): without the standalone core it says nothing was posted,
+    # and the notification bridge reports nothing sent until a notification service is connected.
+    simulated = False
 
     def __init__(self):
         super().__init__()
@@ -181,13 +193,10 @@ class MutualAidEnhancedChip(BaseSkillChip):
         """
         intent = request.intent
 
-        # Step 1: Shield check — blocked patterns from VALUES.json
-        if self._is_shielded(request, context):
-            return SkillResponse(
-                content="This request cannot be processed under the organization's safety guidelines.",
-                success=False,
-                error="shield_blocked",
-            )
+        # Step 1: the shield. Its patterns (VALUES.json) name things this group never does. A person who mentions
+        # one, often someone afraid of it, is told so and helped; nobody is refused for naming a fear (10-19: the old
+        # substring check refused "I need rice" and "my eviction notice", and anyone asking about ICE).
+        shielded = self._is_shielded(request, context)
 
         # Step 2: Extract BDI context for informed decisions
         bdi_context = self._extract_bdi_context(context)
@@ -212,7 +221,11 @@ class MutualAidEnhancedChip(BaseSkillChip):
                 error=f"unknown_intent: {intent}",
             )
 
-        return await handler(request, context, bdi_context)
+        response = await handler(request, context, bdi_context)
+        if shielded and isinstance(response, SkillResponse):
+            response.content = f"{SHIELD_COMMITMENT}\n\n{response.content}"
+            response.data = {**(response.data or {}), "shield_commitment": True}
+        return response
 
     # ------------------------------------------------------------------
     # BDI Integration
@@ -248,16 +261,9 @@ class MutualAidEnhancedChip(BaseSkillChip):
         return bdi
 
     def _is_shielded(self, request: SkillRequest, context: SkillContext) -> bool:
-        """Check if the request hits any shield constraints."""
-        raw = request.raw_input.lower() if hasattr(request, "raw_input") else ""
-
-        # Hard blocks from VALUES.json mutual_aid template
-        blocked_patterns = [
-            "ice", "immigration enforcement", "police report",
-            "credit check", "background check", "means test",
-        ]
-
-        return any(pattern in raw for pattern in blocked_patterns)
+        """Whether the request names something this group never does (the template's patterns, as whole words)."""
+        raw = getattr(request, "raw_input", "") or ""
+        return any(p.search(raw) for p in _SHIELD)
 
     # ------------------------------------------------------------------
     # Handlers — delegate to standalone core when available
@@ -304,11 +310,12 @@ class MutualAidEnhancedChip(BaseSkillChip):
                     data={"entry_id": entry_id, "matches": 0},
                 )
         else:
-            # Fallback to basic Kintsugi handling
+            # Without the standalone core nothing stores a need, so nothing is claimed.
             return SkillResponse(
-                content="Your need has been posted. We'll notify you when a match is found.",
+                content=(f"{not_connected('A needs database', 'your need has not been posted anywhere, and nobody will be told of a match')} "
+                         f"Tell a coordinator directly. {US_REFERRALS}"),
                 success=True,
-                data={"category": request.entities.get("category", "other")},
+                data={"category": request.entities.get("category", "other"), "posted": False, "connected": False},
             )
 
     async def _handle_offer(
@@ -333,8 +340,11 @@ class MutualAidEnhancedChip(BaseSkillChip):
             )
         else:
             return SkillResponse(
-                content="Your offer has been posted. Thank you for helping your community.",
+                content=(f"Thank you for offering. "
+                         f"{not_connected('An offers database', 'your offer has not been posted anywhere')} "
+                         "Tell a coordinator directly."),
                 success=True,
+                data={"posted": False, "connected": False},
             )
 
     async def _handle_match(
@@ -361,8 +371,10 @@ class MutualAidEnhancedChip(BaseSkillChip):
             return SkillResponse(content=narrative, success=True, data=result)
         else:
             return SkillResponse(
-                content="Match request noted. A coordinator will review.",
+                content=(f"{not_connected('A matching engine', 'this match has not been recorded and no coordinator has been told')} "
+                         "Tell a coordinator directly."),
                 success=True,
+                data={"recorded": False, "connected": False},
             )
 
     async def _handle_status(
@@ -392,10 +404,7 @@ class MutualAidEnhancedChip(BaseSkillChip):
 
             # Enrich with BDI — compare against equity desires
             if bdi.get("equity_goals"):
-                gap_report["equity_alignment"] = (
-                    "Active equity goals inform matching priorities. "
-                    "Underserved categories receive urgency boosts."
-                )
+                gap_report["equity_alignment"] = "Equity goals are on record; the matcher doesn't weigh them yet."
 
             return SkillResponse(
                 content=self._format_report(gap_report),
@@ -453,9 +462,10 @@ class MutualAidEnhancedChip(BaseSkillChip):
         This bridges the standalone dispatcher's transport-agnostic
         notify_fn with Kintsugi's MCP notification span.
         """
-        # In production, this would use the notification_service MCP span
-        logger.info("Notification to %s: %s", recipient_id[:8], message[:80])
-        return True
+        # No notification_service span is wired yet: nothing is sent, so nothing is reported delivered (the core's
+        # dispatcher would otherwise record "they've been notified").
+        logger.info("not sent (no notification service connected): to %s", recipient_id[:8])
+        return False
 
     # ------------------------------------------------------------------
     # Formatters

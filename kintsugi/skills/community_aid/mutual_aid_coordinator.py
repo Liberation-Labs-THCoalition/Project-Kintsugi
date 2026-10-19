@@ -238,6 +238,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
         "matching_engine",
         "notification_service",
     ]
+    # Honest (kintsugi/skills/honesty.py): needs, offers and matches are real records here; nothing is sent, and it says so.
+    simulated = False
 
     # Simulated in-memory storage (would be real DB in production)
     _needs: dict[str, AidNeed] = org_scoped(dict)
@@ -312,7 +314,7 @@ class MutualAidCoordinatorChip(BaseSkillChip):
                 "Check your matches with 'show my aid matches'",
                 "Update your need with 'update need status'",
             ] if matches else [
-                "We'll notify you when a match is found",
+                "Check back with 'show my aid matches' (nobody is notified automatically)",
                 "Consider broadening your location radius",
             ],
         )
@@ -342,7 +344,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
 
         return SkillResponse(
             content=f"Thank you for your offer to help! Your offer has been registered "
-                    f"(ID: {offer.id[:8]}...). We'll match you with community members in need.",
+                    f"(ID: {offer.id[:8]}...). It's on record here and will be considered when needs are matched; "
+                    f"nobody is notified automatically.",
             success=True,
             data={
                 "offer_id": offer.id,
@@ -351,7 +354,6 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             },
             suggestions=[
                 "View matching needs with 'show needs I can help with'",
-                "Update your availability with 'update my offer'",
             ],
         )
 
@@ -414,8 +416,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
         # This action requires consensus for privacy
         if not match.contact_shared:
             return SkillResponse(
-                content="Match confirmation requires approval from both parties. "
-                        "A consensus request has been initiated.",
+                content="Sharing contact details needs approval from two people, and this skill has no step that "
+                        "shares them yet. Nothing has been shared.",
                 success=True,
                 requires_consensus=True,
                 consensus_action="share_requester_info",
@@ -427,7 +429,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
 
         match.status = AidStatus.IN_PROGRESS
         return SkillResponse(
-            content="Match confirmed! Contact information has been shared securely.",
+            content="Match confirmed and marked in progress here. This system shares no contact details: connect the "
+                    "two people yourselves.",
             success=True,
             data={"match_id": match_id, "status": "in_progress"},
         )

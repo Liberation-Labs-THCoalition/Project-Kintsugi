@@ -211,6 +211,8 @@ class ResourceRedistributionChip(BaseSkillChip):
         "logistics_api",
         "partner_network",
     ]
+    # Honest (kintsugi/skills/honesty.py): surplus, requests, pickups and partners are real records here; nobody is told, and it says so.
+    simulated = False
 
     # Simulated storage
     _surplus: dict[str, SurplusResource] = org_scoped(dict)
@@ -298,7 +300,7 @@ class ResourceRedistributionChip(BaseSkillChip):
                 "Schedule pickup with 'schedule redistribution pickup'",
                 "Check inventory with 'show current inventory'",
             ] if matches else [
-                "We'll alert partners when a match is found",
+                "Check again later with 'show current inventory' (partners aren't alerted automatically)",
             ],
         )
 
@@ -371,8 +373,8 @@ class ResourceRedistributionChip(BaseSkillChip):
             )
 
         return SkillResponse(
-            content=f"Pickup scheduled for {schedule.pickup_time.strftime('%Y-%m-%d %H:%M')}. "
-                    f"Schedule ID: {schedule.id[:8]}...",
+            content=f"Pickup recorded here for {schedule.pickup_time.strftime('%Y-%m-%d %H:%M')} "
+                    f"(ID: {schedule.id[:8]}...). Nobody has been told: arrange it with the donor and a driver.",
             success=True,
             data={
                 "schedule_id": schedule.id,
@@ -382,8 +384,7 @@ class ResourceRedistributionChip(BaseSkillChip):
                 "volunteer_assigned": schedule.volunteer_id is not None,
             },
             suggestions=[
-                "Assign a volunteer with 'assign volunteer to pickup'",
-                "View all scheduled pickups with 'show pickup schedule'",
+                "Check inventory with 'show current inventory'",
             ],
         )
 
@@ -470,7 +471,7 @@ class ResourceRedistributionChip(BaseSkillChip):
                 )
 
             return SkillResponse(
-                content=f"Partner {partner.name} connected successfully (ID: {partner.id[:8]}...).",
+                content=f"Partner {partner.name} added to your records (ID: {partner.id[:8]}...). Nothing was sent to them.",
                 success=True,
                 data={"partner": self._partner_to_dict(partner)},
             )
