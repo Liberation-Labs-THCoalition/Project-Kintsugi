@@ -9,9 +9,18 @@ Security Measures:
     - Import restrictions (whitelist approach)
     - Network access control
     - Filesystem access control
-    - Memory limits
-    - CPU time limits
-    - Execution timeout
+    - A wait timeout: the caller stops waiting after max_execution_time
+
+Not enforced: stopping the plugin itself. The timeout ends the caller's wait and records a violation; it doesn't stop
+the plugin. A sync plugin's thread runs on to its end, and an async plugin that never awaits can't be timed out at all,
+because the event loop never gets the chance to fire the timer (Vera, 2026-10-19).
+
+Not enforced: memory and CPU limits. Plugin methods run in the host process, and an in-process limit can only be
+put on the whole process. The old code set RLIMIT_AS and RLIMIT_CPU on the host itself, which lowered the server's
+hard limits for good (an unprivileged process can't raise them back) and got the server SIGKILLed once its own
+lifetime CPU passed max_cpu_seconds (2026-10-19). max_memory_mb and max_cpu_seconds are kept on the policy for the
+day execution moves to a child process, where they, and a timeout that really stops the plugin, can be applied
+safely; until then they're advisory.
 
 Example:
     from kintsugi.plugins.sandbox import PluginSandbox, SandboxPolicy
@@ -41,7 +50,6 @@ from datetime import datetime, timezone
 from typing import Any
 import asyncio
 import logging
-import resource
 import signal
 import sys
 import traceback
@@ -61,8 +69,8 @@ class SandboxPolicy:
     Attributes:
         allow_network: Whether to allow network access.
         allow_filesystem: Whether to allow filesystem access.
-        max_memory_mb: Maximum memory allocation in MB.
-        max_cpu_seconds: Maximum CPU time in seconds.
+        max_memory_mb: Maximum memory allocation in MB. Advisory: not enforced in-process (see the module docstring).
+        max_cpu_seconds: Maximum CPU time in seconds. Advisory: not enforced in-process (see the module docstring).
         allowed_imports: Whitelist of allowed module imports.
         blocked_imports: Blacklist of blocked imports (overrides whitelist).
         allowed_builtins: Whitelist of allowed builtin functions.
@@ -298,8 +306,8 @@ class RestrictedImporter:
 class PluginSandbox:
     """Sandboxed execution environment for plugins.
 
-    Provides a secure execution environment for plugin code with
-    resource limits and access controls.
+    Runs plugin code with import restrictions and a wait timeout that doesn't stop the plugin. No memory or CPU limits
+    are enforced: plugin code runs in the host process (see the module docstring).
 
     Attributes:
         _policy: The security policy to enforce.
@@ -509,8 +517,9 @@ class PluginSandbox:
     ) -> SandboxExecutionResult:
         """Execute a plugin method in the sandbox.
 
-        Runs the specified method with resource limits and
-        access controls in place.
+        Runs the specified method with the import restrictions in place, and stops waiting after the timeout (the
+        plugin itself isn't stopped). It sets no resource limits: in-process they would apply to the host (see the
+        module docstring).
 
         Args:
             plugin: The plugin to execute.
@@ -535,9 +544,6 @@ class PluginSandbox:
                 success=False,
                 error=f"Method '{method}' not found on plugin",
             )
-
-        # Set up resource limits
-        old_limits = self._set_resource_limits()
 
         # Install restricted importer
         self._restricted_importer = RestrictedImporter(self._policy)
@@ -592,9 +598,6 @@ class PluginSandbox:
             violations.extend(self._restricted_importer.violations)
             self._restricted_importer = None
 
-            # Restore resource limits
-            self._restore_resource_limits(old_limits)
-
         execution_time = (asyncio.get_event_loop().time() - start_time) * 1000
 
         # Record violations
@@ -607,55 +610,6 @@ class PluginSandbox:
             execution_time_ms=execution_time,
             violations=violations,
         )
-
-    def _set_resource_limits(self) -> dict[str, Any]:
-        """Set resource limits for sandbox execution.
-
-        Returns:
-            Dictionary of old limits to restore later.
-        """
-        old_limits = {}
-
-        try:
-            # Set memory limit
-            memory_bytes = self._policy.max_memory_mb * 1024 * 1024
-            old_limits['memory'] = resource.getrlimit(resource.RLIMIT_AS)
-            resource.setrlimit(
-                resource.RLIMIT_AS,
-                (memory_bytes, memory_bytes)
-            )
-        except (ValueError, resource.error):
-            pass
-
-        try:
-            # Set CPU time limit
-            old_limits['cpu'] = resource.getrlimit(resource.RLIMIT_CPU)
-            resource.setrlimit(
-                resource.RLIMIT_CPU,
-                (self._policy.max_cpu_seconds, self._policy.max_cpu_seconds)
-            )
-        except (ValueError, resource.error):
-            pass
-
-        return old_limits
-
-    def _restore_resource_limits(self, old_limits: dict[str, Any]) -> None:
-        """Restore previous resource limits.
-
-        Args:
-            old_limits: Dictionary of limits to restore.
-        """
-        try:
-            if 'memory' in old_limits:
-                resource.setrlimit(resource.RLIMIT_AS, old_limits['memory'])
-        except (ValueError, resource.error):
-            pass
-
-        try:
-            if 'cpu' in old_limits:
-                resource.setrlimit(resource.RLIMIT_CPU, old_limits['cpu'])
-        except (ValueError, resource.error):
-            pass
 
     def get_execution_stats(self) -> dict[str, Any]:
         """Get sandbox execution statistics.
