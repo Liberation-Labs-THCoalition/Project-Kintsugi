@@ -272,6 +272,20 @@ class SkillCapability(str, Enum):
     EXECUTE_SHELL = "execute_shell"
 
 
+# Shared by every path that runs a skill: the direct route and the agent path (agent, session and dashboard messages).
+# Two paths with two copies of a guard is how the second path ended up with none (Vera's re-check, 2026-10-18).
+
+# Parameters only the server may set. A caller-supplied "approved" used to authorize BashSkillChip's approval tier
+# (Vera, 2026-09-24).
+RESERVED_PARAMETERS = frozenset({"approved"})
+
+
+def is_shell_capable(chip) -> bool:
+    """Whether a chip can run shell commands. Keyed on capability, not name: a renamed shell chip is still a shell
+    (Vera, 2026-09-29)."""
+    return SkillCapability.EXECUTE_SHELL in (getattr(chip, "capabilities", None) or ())
+
+
 @dataclass
 class ActivationCondition:
     """Predicate that determines when a Program Function fires.

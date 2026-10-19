@@ -29,7 +29,7 @@ from kintsugi.oracle.hooks import AgentTurn
 from kintsugi.oracle.monitor import OracleLoopMonitor, get_oracle_monitor
 from kintsugi.security.monitor import SecurityMonitor, Verdict
 from kintsugi.security.pii import PIIRedactor
-from kintsugi.skills.base import SkillContext, SkillRequest
+from kintsugi.skills.base import RESERVED_PARAMETERS, SkillContext, SkillRequest, is_shell_capable
 from kintsugi.skills.registry import SkillRegistry, get_registry
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,10 @@ class TurnResult:
     security: dict[str, Any]
     oracle: dict[str, Any]
     blocked: bool = False
+    # The chip's own flag that its action needs approval, carried to the caller instead of being dropped (Vera's
+    # re-check, 2026-10-18). Nothing consumes it yet; the consensus consumer is the next change.
+    requires_consensus: bool = False
+    consensus_action: str | None = None
     turn_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -76,6 +80,8 @@ class TurnResult:
             "security": self.security,
             "oracle": self.oracle,
             "blocked": self.blocked,
+            "requires_consensus": self.requires_consensus,
+            "consensus_action": self.consensus_action,
             "timestamp": self.timestamp.isoformat(),
         }
 
@@ -189,7 +195,7 @@ class AgentInstance:
         self._events.publish("message.routed", routing_info, agent_id=self.id, session_id=session_id)
 
         # 4. Execute the best permitted skill in that domain
-        response_text, skill_used = await self._execute_skill(
+        response_text, skill_used, consensus = await self._execute_skill(
             decision.skill_domain, message, session_id, user_id, context, claimed_user
         )
 
@@ -224,6 +230,8 @@ class AgentInstance:
             security=security_info,
             oracle=review.verdict.to_dict(),
             blocked=review.blocked,
+            requires_consensus=consensus[0],
+            consensus_action=consensus[1],
         )
         self._events.publish(
             "message.completed",
@@ -241,8 +249,13 @@ class AgentInstance:
         user_id: str,
         context: dict[str, Any],
         claimed_user: str | None = None,
-    ) -> tuple[str, str | None]:
-        """Find a permitted chip for *domain* and run it."""
+    ) -> tuple[str, str | None, tuple[bool, str | None]]:
+        """Find a permitted chip for *domain* and run it. Returns (text, chip name, (requires_consensus, action)).
+
+        The same guards as the direct route (Vera's re-check, 2026-10-18: agent, session and dashboard messages reach
+        here, and this path had none): a shell-capable chip is never run from a message, keyed on capability; the
+        server-only parameters are stripped from the caller's context; and the chip's consensus flag is returned."""
+        no_consensus = (False, None)
         chip = None
         try:
             from kintsugi.skills.base import SkillDomain
@@ -252,7 +265,9 @@ class AgentInstance:
         except ValueError:
             candidates = []
 
-        permitted = [c for c in candidates if self.personality.allows_skill(c.name)]
+        # Shell stays off this path whatever the routing or the keyword table picks: re-enabling it is its own
+        # decision, after consensus and audit, as on the direct route.
+        permitted = [c for c in candidates if self.personality.allows_skill(c.name) and not is_shell_capable(c)]
         if permitted:
             # Prefer the chip whose name overlaps the message text; fall
             # back to the first chip registered in the domain.
@@ -270,10 +285,15 @@ class AgentInstance:
                 f"[{self.personality.display_name}] No skill chip is available for "
                 f"domain '{domain}' under this personality's permissions.",
                 None,
+                no_consensus,
             )
 
         intent = self._choose_intent(chip, message, domain)
-        request = SkillRequest(intent=intent, raw_input=message, parameters=context)
+        reserved = RESERVED_PARAMETERS & set(context)
+        if reserved:
+            logger.warning("stripped reserved parameters %s from a message to agent %s", sorted(reserved), self.id)
+        request = SkillRequest(intent=intent, raw_input=message,
+                               parameters={k: v for k, v in context.items() if k not in RESERVED_PARAMETERS})
         skill_context = SkillContext(
             org_id=self.org_id,
             user_id=user_id,
@@ -287,11 +307,12 @@ class AgentInstance:
             self.stats["skills_executed"] += 1
             self._events.publish(
                 "skill.executed",
-                {"skill": chip.name, "success": response.success},
+                {"skill": chip.name, "success": response.success,
+                 "requires_consensus": response.requires_consensus, "consensus_action": response.consensus_action},
                 agent_id=self.id,
                 session_id=session_id,
             )
-            return response.content, chip.name
+            return response.content, chip.name, (bool(response.requires_consensus), response.consensus_action)
         except Exception as exc:
             logger.exception("skill %s failed", chip.name)
             self._events.publish(
@@ -300,7 +321,7 @@ class AgentInstance:
                 agent_id=self.id,
                 session_id=session_id,
             )
-            return f"Skill '{chip.name}' failed: {exc}", chip.name
+            return f"Skill '{chip.name}' failed: {exc}", chip.name, no_consensus
 
     @staticmethod
     def _choose_intent(chip: Any, message: str, domain: str) -> str:
