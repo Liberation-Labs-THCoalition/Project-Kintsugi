@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -145,6 +146,12 @@ class GrantHunterChip(BaseSkillChip):
     required_spans = ["grants_gov_api", "candid_api", "foundation_directory"]
 
     # Intent routing map
+    # Honest without its sources (kintsugi/skills/honesty.py): no grant, deadline, eligibility verdict or pipeline
+    # figure is invented. With no source connected it says so; eligibility is "unknown" until requirements and a
+    # profile are connected.
+    simulated = False
+    NO_SOURCE = not_connected("A grants source (Grants.gov, Candid or a foundation directory)", "{}")
+
     SUPPORTED_INTENTS = {
         "grant_search": "_handle_search",
         "grant_match": "_handle_match",
@@ -240,14 +247,11 @@ class GrantHunterChip(BaseSkillChip):
 
         if not grants:
             return SkillResponse(
-                content="No grants found matching your criteria. Try broadening your search.",
+                content=(self.NO_SOURCE.format("I can't search for grants") + " Grants.gov's search is public and "
+                         "free to use, and many community foundations list their open grants."),
                 success=True,
-                data={"grants": [], "total": 0},
-                suggestions=[
-                    "Try removing some filters",
-                    "Search for related focus areas",
-                    "Check back weekly for new opportunities",
-                ],
+                data={"grants": [], "total": 0, "connected": False},
+                suggestions=[],
             )
 
         # Format response
@@ -257,10 +261,10 @@ class GrantHunterChip(BaseSkillChip):
             grant_summaries.append(
                 f"- **{g.title}** ({g.funder})\n"
                 f"  Amount: ${g.amount_min:,}-${g.amount_max:,} | Deadline: {deadline_str}\n"
-                f"  Match Score: {g.match_score:.0f}%"
+                f"  Rough score (amount and deadline only, not your profile): {g.match_score:.0f}"
             )
 
-        content = f"Found {len(grants)} grants matching your criteria:\n\n" + "\n\n".join(grant_summaries)
+        content = f"Found {len(grants)} grants:\n\n" + "\n\n".join(grant_summaries)
 
         return SkillResponse(
             content=content,
@@ -270,10 +274,7 @@ class GrantHunterChip(BaseSkillChip):
                 "total": len(grants),
                 "search_criteria": entities,
             },
-            suggestions=[
-                "Would you like me to check eligibility for any of these?",
-                "Should I generate a draft LOI for the top match?",
-            ],
+            suggestions=[],
         )
 
     async def _handle_match(
@@ -298,11 +299,14 @@ class GrantHunterChip(BaseSkillChip):
         # Sort by match score
         scored_grants.sort(key=lambda g: g.match_score, reverse=True)
 
+        if not scored_grants:
+            return SkillResponse(content=self.NO_SOURCE.format("I have no grants to rank"), success=True,
+                                 data={"matched_grants": [], "connected": False})
         top_matches = scored_grants[:5]
-        content_lines = ["Top grant matches for your organization:\n"]
+        content_lines = ["Grants ranked by amount and deadline (your organization's profile isn't used):\n"]
         for i, g in enumerate(top_matches, 1):
             content_lines.append(
-                f"{i}. **{g.title}** - {g.match_score:.0f}% match\n"
+                f"{i}. **{g.title}** - rough score {g.match_score:.0f}\n"
                 f"   Funder: {g.funder} | Amount: ${g.amount_min:,}-${g.amount_max:,}"
             )
 
@@ -310,7 +314,7 @@ class GrantHunterChip(BaseSkillChip):
             content="\n".join(content_lines),
             success=True,
             data={"matched_grants": [g.to_dict() for g in scored_grants]},
-            suggestions=["View detailed eligibility for top match?"],
+            suggestions=[],
         )
 
     async def _handle_deadline(
@@ -328,9 +332,9 @@ class GrantHunterChip(BaseSkillChip):
 
         if not deadlines:
             return SkillResponse(
-                content=f"No grant deadlines in the next {days_ahead} days.",
+                content=self.NO_SOURCE.format(f"I can't list grant deadlines for the next {days_ahead} days"),
                 success=True,
-                data={"deadlines": []},
+                data={"deadlines": [], "connected": False},
             )
 
         content_lines = [f"Upcoming grant deadlines (next {days_ahead} days):\n"]
@@ -364,7 +368,7 @@ class GrantHunterChip(BaseSkillChip):
 
         eligibility = await self.check_eligibility(grant_id, context.org_id)
 
-        status = "ELIGIBLE" if eligibility["is_eligible"] else "NOT ELIGIBLE"
+        status = {True: "ELIGIBLE", False: "NOT ELIGIBLE", None: "UNKNOWN"}[eligibility["is_eligible"]]
         content_lines = [f"Eligibility Status: **{status}**\n"]
 
         if eligibility["met_criteria"]:
@@ -384,7 +388,7 @@ class GrantHunterChip(BaseSkillChip):
             content="\n".join(content_lines),
             success=True,
             data=eligibility,
-            suggestions=["Generate draft LOI?"] if eligibility["is_eligible"] else [],
+            suggestions=[],
         )
 
     async def _handle_report(
@@ -396,6 +400,12 @@ class GrantHunterChip(BaseSkillChip):
 
         # Gather pipeline data
         pipeline = await self._get_pipeline_data(context.org_id, date_range)
+        if pipeline is None:
+            return SkillResponse(
+                content=not_connected("A grant pipeline tracker", "I have no applications, wins or prospects to report"),
+                success=True,
+                data={"pipeline": None, "connected": False},
+            )
 
         content = f"""Grant Pipeline Report ({date_range.upper()})
 
@@ -418,7 +428,7 @@ class GrantHunterChip(BaseSkillChip):
             content=content,
             success=True,
             data=pipeline,
-            suggestions=["Export full report to PDF?", "Set up weekly digest?"],
+            suggestions=[],
         )
 
     # Core implementation methods
@@ -517,21 +527,17 @@ class GrantHunterChip(BaseSkillChip):
         Returns:
             Dictionary with eligibility status and criteria details
         """
-        # In production, this would fetch grant requirements and org profile
-        # and perform detailed eligibility checking
-
+        # Nothing to check against: no grant requirements or organization profile is connected. Unknown, never "yes".
         return {
             "grant_id": grant_id,
             "org_id": org_id,
-            "is_eligible": True,
-            "met_criteria": [
-                "501(c)(3) status",
-                "Operating budget within range",
-                "Geographic service area match",
-            ],
+            "is_eligible": None,
+            "met_criteria": [],
             "unmet_criteria": [],
-            "notes": "Organization appears to meet all stated eligibility requirements.",
-            "confidence": 0.85,
+            "notes": (not_connected("A grant requirements source and an organization profile",
+                                    "I can't check eligibility")
+                      + " Check the funder's eligibility section against your legal status, budget and service "
+                        "area."),
         }
 
     async def get_deadlines(
@@ -649,21 +655,8 @@ Respectfully,
         amount_max: float,
         deadline_after: str | None,
     ) -> list[GrantOpportunity]:
-        """Query Grants.gov API for federal grants."""
-        # Simulated response - in production, would call actual API
-        return [
-            GrantOpportunity(
-                id="grants_gov_001",
-                title="Community Development Block Grant",
-                funder="HUD",
-                amount_min=50000,
-                amount_max=500000,
-                deadline=datetime.now(timezone.utc) + timedelta(days=45),
-                focus_areas=["community development", "housing", "economic development"],
-                source="grants_gov",
-                url="https://grants.gov/example/001",
-            ),
-        ]
+        """Query Grants.gov for federal grants. Not connected yet: nothing is returned, and nothing is made up."""
+        return []
 
     async def _query_candid(
         self,
@@ -671,20 +664,8 @@ Respectfully,
         funder_type: str | None,
         geographic_focus: str | None,
     ) -> list[GrantOpportunity]:
-        """Query Candid Foundation Directory."""
-        return [
-            GrantOpportunity(
-                id="candid_001",
-                title="Youth Education Initiative Grant",
-                funder="Example Foundation",
-                amount_min=10000,
-                amount_max=50000,
-                deadline=datetime.now(timezone.utc) + timedelta(days=60),
-                focus_areas=["education", "youth development"],
-                source="candid",
-                url="https://candid.org/example/001",
-            ),
-        ]
+        """Query Candid. Not connected yet: nothing is returned, and nothing is made up."""
+        return []
 
     async def _query_foundation_directory(
         self,
@@ -692,26 +673,13 @@ Respectfully,
         amount_min: int,
         amount_max: float,
     ) -> list[GrantOpportunity]:
-        """Query local foundation directory."""
-        return [
-            GrantOpportunity(
-                id="fd_001",
-                title="Local Community Support Grant",
-                funder="Community Foundation",
-                amount_min=5000,
-                amount_max=25000,
-                deadline=datetime.now(timezone.utc) + timedelta(days=30),
-                focus_areas=["community", "general support"],
-                source="foundation_directory",
-                url="https://communityfoundation.org/grants",
-            ),
-        ]
+        """Query a foundation directory. Not connected yet: nothing is returned, and nothing is made up."""
+        return []
 
     async def _fetch_grants_by_ids(
         self, grant_ids: list[str]
     ) -> list[GrantOpportunity]:
         """Fetch specific grants by their IDs."""
-        # In production, would query data sources by ID
         all_grants = await self.search_grants()
         return [g for g in all_grants if g.id in grant_ids]
 
@@ -752,20 +720,6 @@ Respectfully,
 
     async def _get_pipeline_data(
         self, org_id: str, date_range: str
-    ) -> dict[str, Any]:
-        """Get grant pipeline statistics."""
-        return {
-            "active": 5,
-            "pending": 3,
-            "won": 2,
-            "won_amount": 75000,
-            "lost": 1,
-            "success_rate": 66.7,
-            "deadlines_7d": 1,
-            "deadlines_30d": 4,
-            "top_prospects": [
-                {"title": "Education Grant", "funder": "Foundation A", "amount": 50000},
-                {"title": "Health Initiative", "funder": "Foundation B", "amount": 30000},
-                {"title": "Community Support", "funder": "Foundation C", "amount": 25000},
-            ],
-        }
+    ) -> dict[str, Any] | None:
+        """Grant pipeline statistics. No tracker is connected yet: None, never invented figures."""
+        return None

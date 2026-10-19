@@ -59,7 +59,6 @@ def _walk_strings(path: Path):
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
     "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
     "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
 }
@@ -104,6 +103,7 @@ URL = re.compile(r"https?://|\bwww\.|\b[\w-]+\.(?:org|com|gov|net|edu)(?:/|\b)|[
 ALLOWED_URLS: set[str] = {
     "https://www.aclu.org",  # the ACLU's own site (know_your_rights; checked 10-19)
     "neweconomy.net",        # the New Economy Coalition's site (solidarity_economy; checked 10-19)
+    "Grants.gov",            # the US federal grants site, named in prose (grant_hunter; checked 10-19)
 }
 
 
@@ -241,6 +241,7 @@ REAL_CHIPS = {
     "VolunteerCoordinatorChip": "the deployment's roster and sender or none; sends nothing it can't, saves nothing (10-19)",
     "DonorStewardshipChip": "drafts from what it's given, with [gaps]; no invented donor, tax fact or figure (10-19)",
     "BoardLiaisonChip": "agendas, minutes and reports as drafts with [gaps]; no invented vote, status or figure (10-19)",
+    "GrantHunterChip": "no invented grant, deadline or pipeline; eligibility unknown until it can be checked (10-19)",
 }
 
 
@@ -917,3 +918,27 @@ async def test_the_board_report_and_packet_invent_no_figure_or_meeting_detail():
     assert packet.data["meeting_packet"]["action_items_from_prior"] is None
     res = await _board("resolution_track", action="list")
     assert res.data["resolutions"] == [] and "FY2024" not in res.content
+
+
+# ---- grant hunter: the repairs -----------------------------------------------------------------------------------------
+
+async def _grants(intent, **entities):
+    from kintsugi.skills.core_ops.grant_hunter import GrantHunterChip
+    return await GrantHunterChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_no_grant_deadline_or_pipeline_is_invented():
+    s = await _grants("grant_search", focus_area="housing")
+    assert s.data["grants"] == [] and "Community Development Block Grant" not in s.content and "isn't connected" in s.content
+    d = await _grants("grant_deadline")
+    assert d.data["deadlines"] == [] and "isn't connected" in d.content
+    r = await _grants("grant_report")
+    assert r.data["pipeline"] is None and "75,000" not in r.content
+
+
+@pytest.mark.asyncio
+async def test_eligibility_is_unknown_not_yes():
+    r = await _grants("grant_eligibility", grant_id="anything-at-all")
+    assert r.data["is_eligible"] is None and "UNKNOWN" in r.content and "ELIGIBLE**" not in r.content.replace("UNKNOWN", "")
+    assert r.data["met_criteria"] == [] and "501(c)(3)" not in r.content
