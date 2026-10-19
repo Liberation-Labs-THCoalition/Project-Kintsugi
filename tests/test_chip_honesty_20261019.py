@@ -1055,3 +1055,88 @@ async def test_a_followup_is_a_draft_with_gaps_and_nothing_scheduled():
     assert "15,000" not in str(f) and "survey.organization.org" not in str(f) and "gift card" not in str(f)
     assert "Scheduled to send" not in r.content and "nothing has been sent or scheduled" in r.content
     assert not r.requires_consensus and _claims_in(r.content) == []
+
+
+# ---- defaults that reach the reader as facts (Vera, 10-19) -------------------------------------------------------------
+# The scans read string literals, so a default in code ($0.00 for a gift nobody named) gets past them. Every intent of
+# every chip that turned the mark off, with empty entities and an empty context: no money figure or percentage may
+# appear, since none came from the input. Sample-mode chips' example catalogues carry the notice and are left out.
+
+MONEY_OR_PERCENT = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?|\b\d+(?:\.\d+)?\s?%")
+
+
+def _intents(cls):
+    """The chip's intents: its SUPPORTED_INTENTS map if it has one, else handle()'s intent -> handler dict (the one whose
+    values are all self._methods)."""
+    import inspect
+    import textwrap
+    if isinstance(getattr(cls, "SUPPORTED_INTENTS", None), dict):
+        return list(cls.SUPPORTED_INTENTS)
+    tree = ast.parse(textwrap.dedent(inspect.getsource(cls.handle)))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Dict) and node.keys
+                and all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in node.keys)
+                and all(isinstance(v, ast.Attribute) and getattr(v.value, "id", "") == "self" for v in node.values)):
+            return [k.value for k in node.keys]
+    return []
+
+
+def _string_fields(value, path="data"):
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield from _string_fields(v, f"{path}.{k}")
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            yield from _string_fields(v, f"{path}[{i}]")
+
+
+# The bash chip runs the command it's given and reports what happened: no figures of its own to invent.
+REAL_INTENTS = [(cls, intent) for cls in CHIPS if not cls.simulated and cls.__name__ != "BashSkillChip"
+                for intent in _intents(cls)]
+
+
+def test_the_default_probe_covers_every_real_chip_and_every_intent():
+    from collections import Counter
+    per_chip = Counter(cls.__name__ for cls, _ in REAL_INTENTS)
+    assert set(per_chip) == set(REAL_CHIPS) - {"BashSkillChip"}
+    assert min(per_chip.values()) >= 4, per_chip                  # an intent map read whole, not a stray dict
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls,intent", REAL_INTENTS, ids=lambda v: getattr(v, "__name__", v))
+async def test_no_money_or_percentage_appears_that_the_input_didnt_give(cls, intent):
+    try:
+        r = await cls().handle(SkillRequest(intent=intent, raw_input=""), SkillContext(org_id="org_d", user_id="key:k-d"))
+    except Exception as e:
+        pytest.fail(f"{cls.__name__}.{intent} crashed on an empty request: {e!r}")
+    found = [(where, m.group(0)) for where, text in [("content", r.content or "")] + list(_string_fields(r.data or {}))
+             for m in MONEY_OR_PERCENT.finditer(text)]
+    assert found == [], found
+
+
+@pytest.mark.asyncio
+async def test_a_thank_you_with_no_amount_has_a_gap_not_zero_dollars():
+    r = await _donor("donor_thank")
+    ack = r.data["acknowledgment"]
+    assert "[gift amount]" in ack["letter"]["opening"] and "$0.00" not in str(r.data) + r.content
+    assert ack["tier"] is None and ack["gift_amount"] is None and "amount not given" in r.content
+    told = await _donor("donor_thank", gift_amount=1200)
+    assert told.data["acknowledgment"]["tier"] == "patron" and "$1,200.00" in told.content
+
+
+@pytest.mark.asyncio
+async def test_a_cultivation_plan_with_no_target_has_a_gap_not_five_thousand():
+    r = await _donor("cultivation_plan")
+    assert "[target amount]" in r.content and "5,000" not in str(r.data) + r.content
+    assert r.data["cultivation_plan"]["target_amount"] is None
+    told = await _donor("cultivation_plan", target_amount=25000)
+    assert "$25,000" in told.content
+
+
+@pytest.mark.asyncio
+async def test_a_report_with_no_matches_has_no_rate():
+    from kintsugi.skills.community_aid.mutual_aid_coordinator import MutualAidCoordinatorChip
+    r = await MutualAidCoordinatorChip().handle(SkillRequest(intent="aid_report", raw_input="r"), _ctx())
+    assert "none yet (no matches)" in r.content and "0.0%" not in r.content

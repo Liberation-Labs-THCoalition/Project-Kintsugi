@@ -219,7 +219,9 @@ class DonorStewardshipChip(BaseSkillChip):
         based on gift amount and donor history.
         """
         donor_id = request.entities.get("donor_id", "")
-        gift_amount = request.entities.get("gift_amount", 0)
+        # No amount given is a gap, never $0.00 (Vera, 10-19): the letter most likely to go out unread.
+        gift_amount = request.entities.get("gift_amount")
+        amount_text = f"${gift_amount:,.2f}" if gift_amount is not None else "[gift amount]"
         gift_type = request.entities.get("gift_type", "one_time")
         designation = request.entities.get("designation", "unrestricted")
         include_impact = request.entities.get("include_impact", True)
@@ -229,7 +231,9 @@ class DonorStewardshipChip(BaseSkillChip):
         # Goods or services given in return: only what we're told. Unknown is a gap to fill, never "none".
         returned_value = request.entities.get("goods_or_services_value")
 
-        if gift_amount >= 10000:
+        if gift_amount is None:
+            tier, signatory = None, "[Signatory]"          # set when the amount is known
+        elif gift_amount >= 10000:
             tier, signatory = "champion", "Board Chair"
         elif gift_amount >= 5000:
             tier, signatory = "benefactor", "Executive Director"
@@ -243,12 +247,12 @@ class DonorStewardshipChip(BaseSkillChip):
                          "good-faith estimate of their value.]")
             deductible = None
         elif returned_value == 0:
-            statement = f"No goods or services were provided in exchange for this gift of ${gift_amount:,.2f}."
+            statement = f"No goods or services were provided in exchange for this gift of {amount_text}."
             deductible = gift_amount
         else:
-            statement = (f"In return for this gift of ${gift_amount:,.2f}, goods or services worth about "
+            statement = (f"In return for this gift of {amount_text}, goods or services worth about "
                          f"${returned_value:,.2f} were provided.")
-            deductible = max(0, gift_amount - returned_value)
+            deductible = max(0, gift_amount - returned_value) if gift_amount is not None else None
 
         acknowledgment = {
             "donor_id": donor_id,
@@ -265,7 +269,7 @@ class DonorStewardshipChip(BaseSkillChip):
             },
             "letter": {
                 "salutation": f"Dear {donor_name},",
-                "opening": f"Thank you for your generous gift of ${gift_amount:,.2f} to support our mission.",
+                "opening": f"Thank you for your generous gift of {amount_text} to support our mission.",
                 "impact_statement": ("[One specific result of your work this gift supports, in your own numbers.]"
                                      if include_impact else None),
                 "closing": "With gratitude,",
@@ -275,11 +279,12 @@ class DonorStewardshipChip(BaseSkillChip):
         }
 
         note = (" For a gift of $250 or more, US tax rules require the receipt to say whether goods or services "
-                "were given in return." if gift_amount >= 250 else "")
+                "were given in return." if gift_amount is not None and gift_amount >= 250 else "")
         requires_approval = self.requires_consensus("send_acknowledgment")
         return SkillResponse(
-            content=(f"Drafted a {tier}-level thank-you for a ${gift_amount:,.2f} gift. Not sent: fill the "
-                     f"[bracketed] parts and review it first.{note}"),
+            content=((f"Drafted a {tier}-level thank-you for a {amount_text} gift." if tier else
+                      "Drafted a thank-you (amount not given; the tier is set when the amount is known).")
+                     + f" Not sent: fill the [bracketed] parts and review it first.{note}"),
             success=True,
             data={"acknowledgment": acknowledgment},
             requires_consensus=requires_approval,
@@ -342,7 +347,9 @@ class DonorStewardshipChip(BaseSkillChip):
         """
         donor_id = request.entities.get("donor_id", "")
         goal = request.entities.get("goal", "major_gift")
-        target_amount = request.entities.get("target_amount", 5000)
+        # No goal named is a gap, never an invented $5,000 (Vera, 10-19).
+        target_amount = request.entities.get("target_amount")
+        target_text = f"${target_amount:,.0f}" if target_amount is not None else "[target amount]"
         timeline_months = request.entities.get("timeline_months", 6)
 
         now = datetime.now(timezone.utc)
@@ -389,7 +396,7 @@ class DonorStewardshipChip(BaseSkillChip):
                 donor_id=donor_id,
                 activity_type="call",
                 scheduled_date=now + timedelta(days=150),
-                notes=f"Solicitation call for ${target_amount:,.0f} gift",
+                notes=f"Solicitation call for a {target_text} gift",
             ),
         ]
 
@@ -435,8 +442,8 @@ class DonorStewardshipChip(BaseSkillChip):
         }
 
         return SkillResponse(
-            content=(f"Draft {timeline_months}-month cultivation plan toward a ${target_amount:,.0f} "
-                     f"{goal.replace('_', ' ')}, with {len(activities)} suggested touchpoints. "
+            content=(f"Draft {timeline_months}-month cultivation plan toward a {goal.replace('_', ' ')} of "
+                     f"{target_text}, with {len(activities)} suggested touchpoints. "
                      f"{not_connected('A calendar', 'nothing has been saved or scheduled')}"),
             success=True,
             data={"cultivation_plan": cultivation_plan},
