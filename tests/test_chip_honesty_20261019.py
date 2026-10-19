@@ -11,8 +11,8 @@ scan every chip's source, so a new stub can't bring them back:
 - no prose that claims an action (sent, notified, alerted, dispatched, scheduled, shared, "will call"...) unless the
   same sentence says it didn't happen, or the claim is listed here with the code that makes it true.
 
-Chips not yet repaired are listed in PENDING_REPAIR, with what's left, and skipped by the scans; the list may only
-shrink (a listed chip with nothing left fails until it's taken off). Meanwhile every response from a chip still on
+Every chip file is scanned. PENDING_REPAIR held the chips whose files still failed the scans, skipped meanwhile; it
+emptied on 2026-10-19 and must stay empty, so a new chip meets the scans on its first commit. Every response from a chip still on
 sample data says so first (BaseSkillChip.simulated), and these tests check that too.
 """
 from __future__ import annotations
@@ -58,14 +58,6 @@ def _walk_strings(path: Path):
 
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
-    "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
-    "volunteer_coordinator.py": "'Sent N notifications' when nothing is sent; invented roster",
-    "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
-    "member_services.py": "renewals 'processed', receipts and emails 'sent'; invented members and figures",
-    "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
-    "board_liaison.py": "invented minutes, motions, votes, compliance status and board report",
-    "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
 }
 
 
@@ -108,6 +100,7 @@ URL = re.compile(r"https?://|\bwww\.|\b[\w-]+\.(?:org|com|gov|net|edu)(?:/|\b)|[
 ALLOWED_URLS: set[str] = {
     "https://www.aclu.org",  # the ACLU's own site (know_your_rights; checked 10-19)
     "neweconomy.net",        # the New Economy Coalition's site (solidarity_economy; checked 10-19)
+    "Grants.gov",            # the US federal grants site, named in prose (grant_hunter; checked 10-19)
 }
 
 
@@ -185,30 +178,12 @@ def test_the_claim_pattern_catches_what_we_found():
         assert not (CLAIM.search(fine) and not NEGATED.search(fine)), fine
 
 
-# ---- the ratchet -----------------------------------------------------------------------------------------------------
+# ---- the repair list ------------------------------------------------------------------------------------------------
 
-@functools.lru_cache(maxsize=None)
-def _scan_everything():
-    """Every chip's scan findings, pending ones included, computed once: (file, text) pairs."""
-    found = [(f, t) for f, n, t in _all_strings(True) if PHONE.search(t) or URL.search(t)]
-    return tuple(found + [(f, t) for f, n, t in _claims(True)])
-
-
-def _violations(name):
-    out = [t for f, t in _scan_everything() if f.endswith("/" + name)]
-    path = next(p for p in CHIP_FILES if p.name == name)
-    for node in ast.walk(ast.parse(path.read_text())):
-        if (isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in ("datetime", "date")
-                and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, int)):
-            out.append(f"date at line {node.lineno}")
-    return out
-
-
-@pytest.mark.parametrize("name", sorted(PENDING_REPAIR))
-def test_a_chip_waiting_for_repair_still_needs_it(name):
-    """Fixed chips come off the list, so the scans cover them from then on."""
-    assert any(p.name == name for p in CHIP_FILES), f"{name} isn't a chip"
-    assert _violations(name), f"{name} passes every scan now: take it off PENDING_REPAIR"
+def test_no_chip_waits_for_repair():
+    """Emptied 2026-10-19: every chip file passes the scans above (some chips still run on sample data and say so).
+    Nothing goes back on the list."""
+    assert PENDING_REPAIR == {}
 
 
 # ---- the sample-mode mark --------------------------------------------------------------------------------------------
@@ -242,6 +217,13 @@ REAL_CHIPS = {
     "MutualAidCoordinatorChip": "real records; says nobody is notified and no contact details are shared (10-19)",
     "ResourceRedistributionChip": "real records; says pickups and partners are recorded, nobody told (10-19)",
     "SolidarityEconomyChip": "formation guidance and real networks; no invented co-op, balance, loan or cost (10-19)",
+    "VolunteerCoordinatorChip": "the deployment's roster and sender or none; sends nothing it can't, saves nothing (10-19)",
+    "DonorStewardshipChip": "drafts from what it's given, with [gaps]; no invented donor, tax fact or figure (10-19)",
+    "BoardLiaisonChip": "agendas, minutes and reports as drafts with [gaps]; no invented vote, status or figure (10-19)",
+    "GrantHunterChip": "no invented grant, deadline or pipeline; eligibility unknown until it can be checked (10-19)",
+    "CoalitionBuilderChip": "real records; says nothing was sent or invited; metrics only from its records (10-19)",
+    "StaffOnboardingChip": "plans as drafts, training as suggestions; no invented policy, progress or sign-off (10-19)",
+    "EventPlannerChip": "drafts and checklists; no invented venue, RSVP, contact, link or result; books and sends nothing (10-19)",
 }
 
 
@@ -712,3 +694,449 @@ async def test_a_warrant_at_the_door_with_no_agency_named_asks_and_shows_the_dif
     assert r.data["topic"] == "warrant_unclear" and r.data["rights_info"] is None
     assert "Is it ICE (immigration) or the police?" in r.content and "signed by a judge" in r.content
     assert "slide the warrant under the door" in r.content
+
+
+# ---- volunteer coordinator: the repairs --------------------------------------------------------------------------------
+
+def _roster(org_id):
+    from kintsugi.skills.core_ops.volunteer_coordinator import Volunteer
+    return [Volunteer(id="v1", name="Dee", email="dee@example.test", skills=["driving"], total_hours=12.0)]
+
+
+@pytest.mark.asyncio
+async def test_no_roster_lists_nobody_and_invents_nobody():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    r = await VolunteerCoordinatorChip().handle(SkillRequest(intent="volunteer_search", raw_input="s"), _ctx())
+    assert r.data["volunteers"] == [] and "isn't connected" in r.content and "Alice" not in r.content
+    h = await VolunteerCoordinatorChip().handle(SkillRequest(intent="volunteer_hours", raw_input="h"), _ctx())
+    assert "isn't connected" in h.content and "425" not in h.content
+
+
+@pytest.mark.asyncio
+async def test_without_a_sender_nothing_is_sent_or_counted_toward_the_limit():
+    from kintsugi.skills.base import org_scope
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    chip = VolunteerCoordinatorChip(roster=_roster)
+    r = await chip.handle(SkillRequest(intent="volunteer_notify", raw_input="n", entities={
+        "volunteer_ids": ["v1"], "message": "Shift moved"}), _ctx())
+    assert r.data["sent"] == 0 and r.data["reachable"] == 1 and "nothing was sent" in r.content
+    assert _claims_in(r.content) == []
+    with org_scope("org_h"):
+        assert chip._notified.get("key:k-h", []) == []
+
+
+@pytest.mark.asyncio
+async def test_with_a_sender_delivery_is_real_and_counted():
+    from kintsugi.skills.base import org_scope
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    delivered = []
+
+    async def sender(volunteer, channel, message):
+        delivered.append((volunteer.id, channel, message))
+        return True
+    chip = VolunteerCoordinatorChip(roster=_roster, sender=sender)
+    r = await chip.handle(SkillRequest(intent="volunteer_notify", raw_input="n", entities={
+        "volunteer_ids": ["v1"], "message": "Shift moved"}), _ctx())
+    assert r.data["sent"] == 1 and delivered == [("v1", "email", "Shift moved")]
+    with org_scope("org_h"):
+        assert sum(n for _, n in chip._notified["key:k-h"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_delivery_is_not_counted_as_sent():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+
+    async def refuses(volunteer, channel, message):
+        return False
+    r = await VolunteerCoordinatorChip(roster=_roster, sender=refuses).handle(SkillRequest(
+        intent="volunteer_notify", raw_input="n", entities={"volunteer_ids": ["v1"], "message": "m"}), _ctx())
+    assert r.data["sent"] == 0 and r.data["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_shift_is_a_draft_and_hours_are_not_recorded():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    chip = VolunteerCoordinatorChip(roster=_roster)
+    s = await chip.handle(SkillRequest(intent="volunteer_schedule", raw_input="s", entities={
+        "volunteer_id": "v1", "date": "2026-10-20", "start_time": "09:00", "end_time": "12:00"}), _ctx())
+    assert s.data["saved"] is False and s.content.startswith("Draft shift") and _claims_in(s.content) == []
+    h = await chip.handle(SkillRequest(intent="volunteer_hours", raw_input="h", entities={
+        "action": "log", "volunteer_id": "v1", "hours": 3}), _ctx())
+    assert h.data["recorded"] is False and "not been recorded" in h.content
+
+
+@pytest.mark.asyncio
+async def test_a_held_mass_notice_without_a_sender_says_approval_sends_nothing():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    held = await VolunteerCoordinatorChip(roster=_roster).handle(SkillRequest(
+        intent="volunteer_notify", raw_input="n", entities={"volunteer_ids": "all", "message": "m"}), _ctx())
+    assert held.metadata.get("held") and "approving this will not send anything" in held.content
+
+
+@pytest.mark.asyncio
+async def test_the_roster_is_asked_for_the_requests_own_org():
+    from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
+    asked = []
+
+    def roster(org_id):
+        asked.append(org_id)
+        return _roster(org_id)
+    await VolunteerCoordinatorChip(roster=roster).handle(SkillRequest(intent="volunteer_notify", raw_input="n",
+        entities={"volunteer_ids": ["v1"], "message": "m"}), _ctx())
+    assert asked and set(asked) == {"org_h"}
+
+
+# ---- member services: the repairs --------------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_no_member_payment_message_or_report_is_invented():
+    from kintsugi.skills.programs_people.member_services import MemberServicesChip
+    chip = MemberServicesChip()
+    look = await chip.handle(SkillRequest(intent="member_lookup", raw_input="l", entities={"member_id": "m-9"}), _ctx())
+    assert look.data["member"] is None and "Jennifer" not in look.content
+    one = await chip.handle(SkillRequest(intent="member_communicate", raw_input="c", entities={
+        "member_id": "m-9", "subject": "Hi"}), _ctx())
+    assert one.data["communication"]["sent"] is False and _claims_in(one.content) == [] and "Sent " not in one.content
+    rep = await chip.handle(SkillRequest(intent="membership_report", raw_input="r"), _ctx())
+    assert rep.data["membership_report"] is None and "277" not in rep.content
+
+
+@pytest.mark.asyncio
+async def test_a_renewal_takes_no_payment_and_the_hold_says_so():
+    from kintsugi.skills.programs_people.member_services import MemberServicesChip
+    held = await MemberServicesChip().handle(SkillRequest(intent="membership_renew", raw_input="r", entities={
+        "member_id": "m-1", "tier": "gold"}), _ctx())
+    assert held.metadata.get("held") and "nothing is charged" in held.content
+
+
+@pytest.mark.asyncio
+async def test_the_example_tiers_stay_in_sample_mode_until_the_organization_gives_its_own():
+    from kintsugi.skills.programs_people.member_services import MemberServicesChip, MembershipTier
+    example = await MemberServicesChip().handle(SkillRequest(intent="benefits_info", raw_input="b"), _ctx())
+    assert example.content.startswith(SAMPLE_NOTICE) and "Most popular" not in example.content
+    own = MemberServicesChip(tiers={"member": MembershipTier(tier_id="t1", name="Member", annual_fee=20.0,
+                                                             benefits=["A vote"], description="d")})
+    try:                                     # the organization's own tier names, which the example's order doesn't know
+        r = await own.handle(SkillRequest(intent="benefits_info", raw_input="b", entities={"tier": "member"}), _ctx())
+    except Exception as e:
+        pytest.fail(f"the organization's own tiers crashed the chip: {e!r}")
+    assert not r.content.startswith(SAMPLE_NOTICE) and "$20.00" in r.content
+    assert MemberServicesChip.simulated is True                        # the class default is still sample
+
+
+# ---- donor stewardship: the repairs ------------------------------------------------------------------------------------
+
+async def _donor(intent, **entities):
+    from kintsugi.skills.programs_people.donor_stewardship import DonorStewardshipChip
+    return await DonorStewardshipChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_a_receipt_never_asserts_no_goods_or_services_unless_told():
+    unknown = await _donor("donor_thank", gift_amount=500)
+    ack = unknown.data["acknowledgment"]
+    assert "No goods or services" not in ack["receipt"]["statement"] and ack["tax_deductible_amount"] is None
+    assert "$250 or more" in unknown.content and ack["sent"] is False
+    told = await _donor("donor_thank", gift_amount=500, goods_or_services_value=0)
+    assert told.data["acknowledgment"]["receipt"]["statement"].startswith("No goods or services")
+    gala = await _donor("donor_thank", gift_amount=500, goods_or_services_value=120)
+    assert gala.data["acknowledgment"]["tax_deductible_amount"] == 380
+
+
+@pytest.mark.asyncio
+async def test_the_letter_uses_the_donors_name_or_a_gap_and_invents_no_impact():
+    named = await _donor("donor_thank", gift_amount=50, donor_name="Ruth")
+    letter = named.data["acknowledgment"]["letter"]
+    assert letter["salutation"] == "Dear Ruth," and "1,800" not in str(letter) and "since" not in str(letter)
+    unnamed = await _donor("donor_thank", gift_amount=50)
+    assert unnamed.data["acknowledgment"]["letter"]["salutation"] == "Dear [Donor name],"
+    assert unnamed.data["acknowledgment"]["receipt"]["organization_name"] == "[Organization name]"
+
+
+@pytest.mark.asyncio
+async def test_no_donor_profile_analysis_or_report_is_invented():
+    for intent, key in (("donor_profile", "profile"), ("giving_history", "giving_analysis"),
+                        ("stewardship_report", "stewardship_report")):
+        r = await _donor(intent, donor_id="d-1")
+        assert r.data[key] is None and "isn't connected" in r.content and "$" not in r.content, intent
+
+
+@pytest.mark.asyncio
+async def test_a_cultivation_plan_is_a_draft_with_suggested_dates():
+    r = await _donor("cultivation_plan", donor_id="d-1")
+    plan = r.data["cultivation_plan"]
+    assert plan["saved"] is False and all("suggested_date" in a and "scheduled_date" not in a for a in plan["activities"])
+    assert "nothing has been saved or scheduled" in r.content and "education/youth" not in str(plan)
+
+
+# ---- board liaison: the repairs ----------------------------------------------------------------------------------------
+
+async def _board(intent, **entities):
+    from kintsugi.skills.programs_people.board_liaison import BoardLiaisonChip
+    return await BoardLiaisonChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_minutes_invent_no_attendee_motion_or_vote():
+    r = await _board("minutes_draft", meeting_id="m-1")
+    m = r.data["minutes"]
+    assert "J. Smith" not in str(m) and "Approved unanimously" not in str(m) and "6:00 PM" not in str(m)
+    assert m["proceedings"][1]["vote"] == "[For / against / abstain]" and "none is invented" in r.content
+    given = await _board("minutes_draft", attendees=["Ana", "Bo"], notes="Budget discussed.")
+    assert given.data["minutes"]["attendance"]["present"] == ["Ana", "Bo"]
+    assert given.data["minutes"]["notes_given"] == "Budget discussed."
+
+
+@pytest.mark.asyncio
+async def test_compliance_is_never_called_compliant_without_a_check():
+    r = await _board("compliance_check")
+    assert {c["status"] for c in r.data["compliance_items"]} == {"not checked"} and "isn't connected" in r.content
+    assert "compliant" not in r.content.replace("not checked", "")
+
+
+@pytest.mark.asyncio
+async def test_the_board_report_and_packet_invent_no_figure_or_meeting_detail():
+    rep = await _board("board_report", include_financials=True, include_programs=True)
+    assert "1250000" not in str(rep.data) and "92%" not in str(rep.data) and "[From your books]" in str(rep.data)
+    packet = await _board("meeting_prep")
+    assert "zoom.us" not in str(packet.data) and "minutes_2024" not in str(packet.data)
+    assert packet.data["meeting_packet"]["action_items_from_prior"] is None
+    res = await _board("resolution_track", action="list")
+    assert res.data["resolutions"] == [] and "FY2024" not in res.content
+
+
+# ---- grant hunter: the repairs -----------------------------------------------------------------------------------------
+
+async def _grants(intent, **entities):
+    from kintsugi.skills.core_ops.grant_hunter import GrantHunterChip
+    return await GrantHunterChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_no_grant_deadline_or_pipeline_is_invented():
+    s = await _grants("grant_search", focus_area="housing")
+    assert s.data["grants"] == [] and "Community Development Block Grant" not in s.content and "isn't connected" in s.content
+    d = await _grants("grant_deadline")
+    assert d.data["deadlines"] == [] and "isn't connected" in d.content
+    r = await _grants("grant_report")
+    assert "pipeline" in r.data and r.data["pipeline"] is None and "75,000" not in r.content
+
+
+@pytest.mark.asyncio
+async def test_eligibility_is_unknown_not_yes():
+    r = await _grants("grant_eligibility", grant_id="anything-at-all")
+    assert r.data["is_eligible"] is None and "UNKNOWN" in r.content and "ELIGIBLE**" not in r.content.replace("UNKNOWN", "")
+    assert r.data["met_criteria"] == [] and "501(c)(3)" not in r.content
+
+
+# ---- coalition builder: the repairs ------------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_outreach_and_meetings_are_recorded_and_say_nothing_was_sent():
+    from kintsugi.skills.community_aid.coalition_builder import CoalitionBuilderChip
+    chip = CoalitionBuilderChip()
+    o = await chip.handle(SkillRequest(intent="partner_outreach", raw_input="o", entities={
+        "action": "send", "partner_id": "p-1", "message": "hello"}), _ctx())
+    assert "recorded here" in o.content and "Outreach sent" not in o.content and _claims_in(o.content) == []
+    m = await chip.handle(SkillRequest(intent="meeting_schedule", raw_input="m", entities={
+        "action": "schedule", "title": "Planning", "scheduled_at": "2026-10-22T18:00:00", "partner_ids": ["p-1"]}), _ctx())
+    assert "No invitations have gone out" in m.content and "Invitations sent" not in m.content
+
+
+@pytest.mark.asyncio
+async def test_the_report_carries_no_placeholder_metric():
+    from kintsugi.skills.community_aid.coalition_builder import CoalitionBuilderChip
+    r = await CoalitionBuilderChip().handle(SkillRequest(intent="coalition_report", raw_input="r"), _ctx())
+    metrics = r.data["metrics"]
+    assert set(metrics) == {"outreach_recorded", "outreach_responded"} and "0.82" not in str(r.data)
+    assert "isn't applied" in r.content
+
+
+# ---- staff onboarding: the repairs -------------------------------------------------------------------------------------
+
+async def _onboarding(intent, **entities):
+    from kintsugi.skills.programs_people.staff_onboarding import StaffOnboardingChip
+    return await StaffOnboardingChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_a_plan_is_a_draft_and_training_is_suggested_not_assigned():
+    p = await _onboarding("onboard_start", employee_name="Ana", department="programs")
+    plan = p.data["onboarding_plan"]
+    assert plan["status"] == "draft" and plan["saved"] is False and "Initialized" not in p.content
+    assert "has not been saved" in p.content and not any("schedule" in s.lower() for s in p.suggestions)
+    t = await _onboarding("training_assign", department="finance")
+    assert t.data["training_assignment"]["assigned"] is False and "Suggested" in t.content
+    assert "none has been assigned" in t.content and "Assigned" not in t.content
+
+
+@pytest.mark.asyncio
+async def test_no_policy_version_or_link_and_no_employee_progress_is_invented():
+    r = await _onboarding("policy_review", employee_id="e-1")
+    assert "2024.1" not in str(r.data) and "/policies/" not in str(r.data) and "Retrieved" not in r.content
+    assert r.data["policy_review"]["connected"] is False and "isn't connected" in r.content
+    c = await _onboarding("checklist_status", employee_id="e-1")
+    assert c.data["onboarding_progress"] is None and "Jane Smith" not in str(c.data) and "65" not in c.content
+    assert "progressing" not in c.content
+
+
+@pytest.mark.asyncio
+async def test_completion_claims_nothing_even_when_forced():
+    from kintsugi.skills.programs_people.staff_onboarding import StaffOnboardingChip
+    chip = StaffOnboardingChip()
+    # the handler itself, past the hold: what an approved run would get
+    r = await chip._complete_onboarding(SkillRequest(intent="onboard_complete", raw_input="x", entities={
+        "employee_id": "e-1", "force_complete": True}), _ctx(), {})
+    assert not r.success and r.data["recorded"] is False and r.data["completion_record"] is None
+    assert r.requires_consensus and r.consensus_action == "complete_onboarding"     # asks again: "no step"
+    for made_up in ("ompleted in", "acknowledged.", "90-day", "certificate", "signoff"):
+        assert made_up not in r.content, made_up
+    assert "not recorded as complete" in r.content and _claims_in(r.content) == []
+
+
+# ---- event planner: the repairs ----------------------------------------------------------------------------------------
+
+async def _event(intent, **entities):
+    from kintsugi.skills.programs_people.event_planner import EventPlannerChip
+    return await EventPlannerChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_an_event_is_a_draft_with_no_made_up_link_or_settled_date():
+    v = await _event("event_create", event_name="Town hall", virtual=True)
+    e = v.data["event"]
+    assert e["virtual_link"] is None and "zoom" not in str(v.data).lower() and e["saved"] is False
+    assert "no video link" in v.content and "placeholder" in v.content and "Created" not in v.content
+    assert "has not been saved, published or booked" in v.content
+    assert next(c for c in e["checklist"] if c["item"] == "Confirm date and time")["completed"] is False
+    assert not any("publish" in s.lower() or "venue availability" in s.lower() for s in v.suggestions)
+    try:                                     # a date typed without a zone used to crash (naive minus aware)
+        g = await _event("event_create", event_name="Town hall", event_date="2026-11-20T18:00:00",
+                         virtual=True, virtual_link="https://meet.example.org/abc")
+    except TypeError as e:
+        pytest.fail(f"a date without a timezone crashed the chip: {e}")
+    assert g.data["event"]["virtual_link"] == "https://meet.example.org/abc" and "no video link" not in g.content
+    assert next(c for c in g.data["event"]["checklist"] if c["item"] == "Confirm date and time")["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_no_rsvp_is_invented_or_claimed_recorded():
+    r = await _event("event_rsvp", event_id="e-1")
+    assert r.data["rsvp_data"]["rsvps"] == [] and "Alice" not in str(r.data) and "confirmed (" not in r.content
+    a = await _event("event_rsvp", event_id="e-1", action="add", attendee={"name": "Sam"})
+    assert a.data["rsvp_data"]["recorded"] is False and "has not been recorded" in a.content
+
+
+@pytest.mark.asyncio
+async def test_logistics_invent_no_venue_vendor_contact_or_spending():
+    r = await _event("event_logistics", expected_attendance=40, budget=2000)
+    lg = r.data["logistics"]
+    assert lg["booked"] is False and lg["venue"]["confirmed"] is False and "Oak Street" not in str(lg)
+    assert lg["budget_tracking"] == {"allocated": 2000, "committed": None, "spent": None, "tracked": False}
+    assert all(c["phone"] is None for c in lg["emergency_contacts"]) and "555" not in str(lg)
+    assert not r.requires_consensus and "Venue confirmed" not in r.content and "nothing is booked" in r.content
+
+
+@pytest.mark.asyncio
+async def test_accessibility_is_unchecked_and_the_statement_has_a_gap_for_the_contact():
+    r = await _event("event_accessibility", venue="Arcata Library")
+    acc = r.data["accessibility"]
+    assert acc["checked"] is False and acc["overall_assessment"] is None and acc["registration_requests"] is None
+    assert all(f["available"] is None for fs in acc["features"].values() for f in fs) and "Room 105" not in str(acc)
+    assert "[contact email or phone]" in acc["accessibility_statement"] and "events@" not in str(acc)
+    assert "none checked" in r.content
+
+
+@pytest.mark.asyncio
+async def test_a_followup_is_a_draft_with_gaps_and_nothing_scheduled():
+    r = await _event("event_followup", followup_type="impact")
+    f = r.data["followup"]
+    assert f["sent"] is False and f["scheduled_send"] is None and f["recipients"]["count"] is None
+    assert "15,000" not in str(f) and "survey.organization.org" not in str(f) and "gift card" not in str(f)
+    assert "Scheduled to send" not in r.content and "nothing has been sent or scheduled" in r.content
+    assert not r.requires_consensus and _claims_in(r.content) == []
+
+
+# ---- defaults that reach the reader as facts (Vera, 10-19) -------------------------------------------------------------
+# The scans read string literals, so a default in code ($0.00 for a gift nobody named) gets past them. Every intent of
+# every chip that turned the mark off, with empty entities and an empty context: no money figure or percentage may
+# appear, since none came from the input. Sample-mode chips' example catalogues carry the notice and are left out.
+
+MONEY_OR_PERCENT = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?|\b\d+(?:\.\d+)?\s?%")
+
+
+def _intents(cls):
+    """The chip's intents: its SUPPORTED_INTENTS map if it has one, else handle()'s intent -> handler dict (the one whose
+    values are all self._methods)."""
+    import inspect
+    import textwrap
+    if isinstance(getattr(cls, "SUPPORTED_INTENTS", None), dict):
+        return list(cls.SUPPORTED_INTENTS)
+    tree = ast.parse(textwrap.dedent(inspect.getsource(cls.handle)))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Dict) and node.keys
+                and all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in node.keys)
+                and all(isinstance(v, ast.Attribute) and getattr(v.value, "id", "") == "self" for v in node.values)):
+            return [k.value for k in node.keys]
+    return []
+
+
+def _string_fields(value, path="data"):
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield from _string_fields(v, f"{path}.{k}")
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            yield from _string_fields(v, f"{path}[{i}]")
+
+
+# The bash chip runs the command it's given and reports what happened: no figures of its own to invent.
+REAL_INTENTS = [(cls, intent) for cls in CHIPS if not cls.simulated and cls.__name__ != "BashSkillChip"
+                for intent in _intents(cls)]
+
+
+def test_the_default_probe_covers_every_real_chip_and_every_intent():
+    from collections import Counter
+    per_chip = Counter(cls.__name__ for cls, _ in REAL_INTENTS)
+    assert set(per_chip) == set(REAL_CHIPS) - {"BashSkillChip"}
+    assert min(per_chip.values()) >= 4, per_chip                  # an intent map read whole, not a stray dict
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls,intent", REAL_INTENTS, ids=lambda v: getattr(v, "__name__", v))
+async def test_no_money_or_percentage_appears_that_the_input_didnt_give(cls, intent):
+    try:
+        r = await cls().handle(SkillRequest(intent=intent, raw_input=""), SkillContext(org_id="org_d", user_id="key:k-d"))
+    except Exception as e:
+        pytest.fail(f"{cls.__name__}.{intent} crashed on an empty request: {e!r}")
+    found = [(where, m.group(0)) for where, text in [("content", r.content or "")] + list(_string_fields(r.data or {}))
+             for m in MONEY_OR_PERCENT.finditer(text)]
+    assert found == [], found
+
+
+@pytest.mark.asyncio
+async def test_a_thank_you_with_no_amount_has_a_gap_not_zero_dollars():
+    r = await _donor("donor_thank")
+    ack = r.data["acknowledgment"]
+    assert "[gift amount]" in ack["letter"]["opening"] and "$0.00" not in str(r.data) + r.content
+    assert ack["tier"] is None and ack["gift_amount"] is None and "amount not given" in r.content
+    told = await _donor("donor_thank", gift_amount=1200)
+    assert told.data["acknowledgment"]["tier"] == "patron" and "$1,200.00" in told.content
+
+
+@pytest.mark.asyncio
+async def test_a_cultivation_plan_with_no_target_has_a_gap_not_five_thousand():
+    r = await _donor("cultivation_plan")
+    assert "[target amount]" in r.content and "5,000" not in str(r.data) + r.content
+    assert r.data["cultivation_plan"]["target_amount"] is None
+    told = await _donor("cultivation_plan", target_amount=25000)
+    assert "$25,000" in told.content
+
+
+@pytest.mark.asyncio
+async def test_a_report_with_no_matches_has_no_rate():
+    from kintsugi.skills.community_aid.mutual_aid_coordinator import MutualAidCoordinatorChip
+    r = await MutualAidCoordinatorChip().handle(SkillRequest(intent="aid_report", raw_input="r"), _ctx())
+    assert "none yet (no matches)" in r.content and "0.0%" not in r.content

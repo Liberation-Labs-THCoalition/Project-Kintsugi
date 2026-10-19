@@ -25,6 +25,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -123,17 +124,16 @@ class EventPlannerChip(BaseSkillChip):
     consensus_intents = {}
     consensus_unreachable = {
         "finalize_event": "no intent performs this yet: declared for a future one, so it can't happen ungated",
-        "send_invitations": (
-            "advisory: event_followup returns a drafted follow-up (nothing is sent or scheduled); its flag says "
-            "this needs approval, and no intent performs it"
-        ),
-        "commit_budget": (
-            "advisory: event_logistics returns a logistics plan; its flag says this needs approval, and no intent"
-            " performs it"
-        ),
+        # event_followup only drafts and event_logistics only lists what to arrange: nothing sends or spends (10-19)
+        "send_invitations": "no intent performs this yet: declared for a future one, so it can't happen ungated",
+        "commit_budget": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }
 
     required_spans = ["calendar_api", "rsvp_system", "venue_booking", "accessibility_checker"]
+    # Honest without its spans (kintsugi/skills/honesty.py): events are drafts, logistics and accessibility are
+    # checklists of what to arrange and ask, follow-ups are drafts with [gaps]; no venue, vendor, RSVP, contact, link or
+    # result is invented, and nothing is booked, sent or scheduled.
+    simulated = False
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -210,10 +210,7 @@ class EventPlannerChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Create a new event with initial configuration.
-
-        Sets up event with date, location, capacity, and budget.
-        """
+        """Draft an event: date, place, capacity and budget as given, a checklist and milestones. Nothing is saved."""
         event_name = request.entities.get("event_name", "Untitled Event")
         event_type = request.entities.get("event_type", "meeting")
         event_date = request.entities.get("event_date", (datetime.now(timezone.utc) + timedelta(days=30)).isoformat())
@@ -223,6 +220,8 @@ class EventPlannerChip(BaseSkillChip):
         capacity = request.entities.get("capacity", 50)
         budget = request.entities.get("budget", 0.0)
         description = request.entities.get("description", "")
+        virtual_link = request.entities.get("virtual_link") or None
+        date_given = "event_date" in request.entities
 
         event_dt = datetime.fromisoformat(event_date) if isinstance(event_date, str) else event_date
         end_dt = event_dt + timedelta(hours=duration_hours)
@@ -234,7 +233,7 @@ class EventPlannerChip(BaseSkillChip):
             date=event_dt,
             end_date=end_dt,
             location=location or ("Virtual" if virtual else "TBD"),
-            virtual_link="https://zoom.us/j/123456789" if virtual else None,
+            virtual_link=virtual_link,
             capacity=capacity,
             status="draft",
             description=description,
@@ -243,10 +242,11 @@ class EventPlannerChip(BaseSkillChip):
         )
 
         # Generate event checklist based on type
-        checklist = self._generate_event_checklist(event)
+        checklist = self._generate_event_checklist(event, date_given)
 
-        # Calculate timeline milestones
-        now = datetime.now(timezone.utc)
+        # Calculate timeline milestones. "Now" in the date's own zone: a date typed without one stays as typed (a naive
+        # date used to crash here: naive minus aware).
+        now = datetime.now(event_dt.tzinfo)
         days_until_event = (event_dt - now).days
 
         milestones = []
@@ -280,24 +280,28 @@ class EventPlannerChip(BaseSkillChip):
             "checklist": checklist,
             "milestones": milestones,
             "days_until_event": days_until_event,
+            "saved": False,
         }
+        gaps = []
+        if not date_given:
+            gaps.append("no date was given, so it's a placeholder 30 days out")
+        if virtual and not virtual_link:
+            gaps.append("there's no video link yet: add your own")
 
         return SkillResponse(
-            content=f"Created {event_type} event '{event_name}' for {event_dt.strftime('%B %d, %Y at %I:%M %p')}. "
-                    f"Capacity: {capacity}. Status: draft. {days_until_event} days until event.",
+            content=(f"Draft {event_type} event '{event_name}' for {event_dt.strftime('%B %d, %Y at %I:%M %p')}, "
+                     f"capacity {capacity}, with a {len(checklist)}-item checklist. "
+                     + (f"Note: {'; '.join(gaps)}. " if gaps else "")
+                     + not_connected("A calendar", "it has not been saved, published or booked")),
             success=True,
             data={"event": event_data},
-            suggestions=[
-                "Would you like to finalize and publish the event?",
-                "Should I check venue availability?",
-                "Want to set up registration?",
-            ],
+            suggestions=["Draft a logistics checklist", "Draft an accessibility checklist"],
         )
 
-    def _generate_event_checklist(self, event: Event) -> list[dict[str, Any]]:
-        """Generate event checklist based on event type."""
+    def _generate_event_checklist(self, event: Event, date_given: bool = True) -> list[dict[str, Any]]:
+        """Generate event checklist based on event type: only what the request itself settles is marked done."""
         base_checklist = [
-            {"item": "Confirm date and time", "category": "planning", "completed": True},
+            {"item": "Confirm date and time", "category": "planning", "completed": date_given},
             {"item": "Determine budget", "category": "planning", "completed": event.budget > 0},
             {"item": "Create event description", "category": "planning", "completed": bool(event.description)},
             {"item": "Set up registration", "category": "registration", "completed": False},
@@ -339,135 +343,19 @@ class EventPlannerChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Manage event RSVPs and registration.
-
-        Handles registration, updates, and waitlist management.
-        """
+        """RSVPs: none are listed or recorded without an RSVP system, and none is invented."""
         event_id = request.entities.get("event_id", "")
         action = request.entities.get("action", "list")  # list, add, update, cancel
         attendee_data = request.entities.get("attendee", {})
 
-        # Simulated RSVP data (would query actual database)
-        rsvps = [
-            RSVP(
-                rsvp_id="rsvp_001",
-                event_id=event_id,
-                attendee_name="Alice Thompson",
-                attendee_email="alice@example.com",
-                status="confirmed",
-                guests=1,
-                dietary_requirements="vegetarian",
-            ),
-            RSVP(
-                rsvp_id="rsvp_002",
-                event_id=event_id,
-                attendee_name="Bob Martinez",
-                attendee_email="bob@example.com",
-                status="confirmed",
-                guests=0,
-                accessibility_needs=["wheelchair_access"],
-            ),
-            RSVP(
-                rsvp_id="rsvp_003",
-                event_id=event_id,
-                attendee_name="Carol Williams",
-                attendee_email="carol@example.com",
-                status="tentative",
-                guests=2,
-            ),
-            RSVP(
-                rsvp_id="rsvp_004",
-                event_id=event_id,
-                attendee_name="David Chen",
-                attendee_email="david@example.com",
-                status="declined",
-                guests=0,
-            ),
-            RSVP(
-                rsvp_id="rsvp_005",
-                event_id=event_id,
-                attendee_name="Elena Rodriguez",
-                attendee_email="elena@example.com",
-                status="waitlist",
-                guests=1,
-            ),
-        ]
-
-        # Handle add action
-        if action == "add" and attendee_data:
-            new_rsvp = RSVP(
-                rsvp_id=f"rsvp_{uuid4().hex[:8]}",
-                event_id=event_id,
-                attendee_name=attendee_data.get("name", ""),
-                attendee_email=attendee_data.get("email", ""),
-                status=attendee_data.get("status", "confirmed"),
-                guests=attendee_data.get("guests", 0),
-                dietary_requirements=attendee_data.get("dietary", None),
-                accessibility_needs=attendee_data.get("accessibility", []),
-            )
-            rsvps.append(new_rsvp)
-
-        # Calculate statistics
-        confirmed = [r for r in rsvps if r.status == "confirmed"]
-        tentative = [r for r in rsvps if r.status == "tentative"]
-        declined = [r for r in rsvps if r.status == "declined"]
-        waitlist = [r for r in rsvps if r.status == "waitlist"]
-
-        total_confirmed_attendees = sum(r.guests + 1 for r in confirmed)
-        total_tentative_attendees = sum(r.guests + 1 for r in tentative)
-
-        # Aggregate dietary and accessibility needs
-        dietary_needs = {}
-        accessibility_needs = {}
-
-        for rsvp in confirmed + tentative:
-            if rsvp.dietary_requirements:
-                dietary_needs[rsvp.dietary_requirements] = dietary_needs.get(rsvp.dietary_requirements, 0) + 1
-            for need in rsvp.accessibility_needs:
-                accessibility_needs[need] = accessibility_needs.get(need, 0) + 1
-
-        rsvp_data = {
-            "event_id": event_id,
-            "rsvps": [
-                {
-                    "rsvp_id": r.rsvp_id,
-                    "name": r.attendee_name,
-                    "email": r.attendee_email,
-                    "status": r.status,
-                    "guests": r.guests,
-                    "dietary": r.dietary_requirements,
-                    "accessibility": r.accessibility_needs,
-                    "registered_at": r.registered_at.isoformat(),
-                }
-                for r in rsvps
-            ],
-            "summary": {
-                "confirmed": len(confirmed),
-                "tentative": len(tentative),
-                "declined": len(declined),
-                "waitlist": len(waitlist),
-                "total_responses": len(rsvps),
-                "confirmed_attendees": total_confirmed_attendees,
-                "tentative_attendees": total_tentative_attendees,
-                "expected_attendance": total_confirmed_attendees + (total_tentative_attendees // 2),
-            },
-            "special_needs": {
-                "dietary": dietary_needs,
-                "accessibility": accessibility_needs,
-            },
-        }
-
-        return SkillResponse(
-            content=f"RSVP summary for event: {len(confirmed)} confirmed ({total_confirmed_attendees} attendees), "
-                    f"{len(tentative)} tentative, {len(declined)} declined, {len(waitlist)} on waitlist.",
-            success=True,
-            data={"rsvp_data": rsvp_data},
-            suggestions=[
-                "Would you like to send reminders to tentative responses?",
-                "Should I move someone from waitlist to confirmed?",
-                "Want to export the attendee list?",
-            ],
-        )
+        rsvp_data = {"event_id": event_id, "rsvps": [], "summary": None, "special_needs": None,
+                     "connected": False, "recorded": False}
+        if action in ("add", "update", "cancel") and attendee_data:
+            name = attendee_data.get("name") or "this attendee"
+            content = not_connected("An RSVP system", f"the RSVP for {name} has not been recorded")
+        else:
+            content = not_connected("An RSVP system", "I can't list RSVPs or count attendance")
+        return SkillResponse(content=content, success=True, data={"rsvp_data": rsvp_data}, suggestions=[])
 
     async def _coordinate_logistics(
         self,
@@ -475,110 +363,45 @@ class EventPlannerChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Coordinate event logistics including vendors, materials, and staffing.
-
-        Creates logistics plan and tracks vendor arrangements.
-        """
+        """A logistics checklist to fill in: venue, catering, A/V, staffing, materials, timeline. Nothing is booked."""
         event_id = request.entities.get("event_id", "")
         event_type = request.entities.get("event_type", "meeting")
         expected_attendance = request.entities.get("expected_attendance", 50)
-        budget = request.entities.get("budget", 5000)
+        budget = request.entities.get("budget")
 
         logistics = {
             "event_id": event_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "venue": {
-                "name": "Community Center Main Hall",
-                "address": "456 Oak Street, Anytown, ST 12345",
-                "capacity": 100,
-                "rental_cost": 500,
-                "setup_time": "3 hours before",
-                "teardown_time": "2 hours after",
-                "contact": "Venue Manager (555-123-4567)",
-                "confirmed": True,
-            },
-            "catering": {
-                "vendor": "Local Catering Co.",
-                "menu": "Buffet lunch with vegetarian options",
-                "per_person_cost": 25,
-                "total_cost": expected_attendance * 25,
-                "dietary_accommodations": ["vegetarian", "gluten-free", "dairy-free"],
-                "serving_style": "buffet",
-                "confirmed": False,
-            },
-            "av_equipment": {
-                "microphone": {"quantity": 2, "type": "wireless", "provided_by": "venue"},
-                "projector": {"quantity": 1, "type": "LCD", "provided_by": "organization"},
-                "screen": {"quantity": 1, "type": "projection", "provided_by": "venue"},
-                "speakers": {"quantity": 2, "type": "powered", "provided_by": "venue"},
-                "laptop": {"quantity": 1, "type": "presentation", "provided_by": "organization"},
-            },
-            "staffing": {
-                "event_lead": "Program Manager",
-                "registration_table": 2,
-                "room_monitors": 1,
-                "tech_support": 1,
-                "volunteers_needed": 4,
-                "volunteers_confirmed": 2,
-            },
-            "materials": [
-                {"item": "Name badges", "quantity": expected_attendance, "status": "ordered"},
-                {"item": "Programs/agendas", "quantity": expected_attendance, "status": "pending"},
-                {"item": "Sign-in sheets", "quantity": 5, "status": "ready"},
-                {"item": "Signage/banners", "quantity": 3, "status": "pending"},
-                {"item": "Table numbers", "quantity": 10, "status": "ready"},
-            ],
+            "booked": False,
+            "venue": {"to_decide": ["Venue and address", f"Capacity for about {expected_attendance}",
+                                    "Rental cost and deposit", "Setup and teardown times", "Venue contact"],
+                      "confirmed": False},
+            "catering": {"to_decide": ["Caterer", "Menu and serving style", "Cost per person",
+                                       "Dietary needs (ask at registration)"],
+                         "confirmed": False},
+            "av_equipment": {"to_decide": ["Microphones", "Projector and screen", "Speakers",
+                                           "Who provides each: venue or organization"]},
+            "staffing": {"to_decide": ["Event lead", "Registration table", "Room monitors", "Tech support",
+                                       "Volunteers needed"]},
+            "materials": [{"item": i, "status": "not started"} for i in
+                          ("Name badges", "Programs/agendas", "Sign-in sheets", "Signage")],
             "timeline": {
-                "day_before": [
-                    {"time": "2:00 PM", "task": "Confirm all vendors"},
-                    {"time": "4:00 PM", "task": "Prepare materials and supplies"},
-                ],
-                "event_day": [
-                    {"time": "9:00 AM", "task": "Venue access and setup begins"},
-                    {"time": "10:00 AM", "task": "A/V equipment check"},
-                    {"time": "11:00 AM", "task": "Catering arrives"},
-                    {"time": "11:30 AM", "task": "Registration table ready"},
-                    {"time": "12:00 PM", "task": "Event start"},
-                    {"time": "3:00 PM", "task": "Event end, teardown begins"},
-                    {"time": "5:00 PM", "task": "Venue cleared"},
-                ],
+                "day_before": ["Confirm all vendors", "Prepare materials and supplies"],
+                "event_day": ["Venue access and setup", "A/V check", "Catering arrives", "Registration opens",
+                              "Event start", "Event end and teardown", "Venue cleared"],
             },
-            "budget_tracking": {
-                "allocated": budget,
-                "committed": 500 + (expected_attendance * 25),
-                "spent": 500,
-                "remaining": budget - 500 - (expected_attendance * 25),
-                "line_items": [
-                    {"category": "Venue", "budgeted": 500, "actual": 500},
-                    {"category": "Catering", "budgeted": expected_attendance * 25, "actual": 0},
-                    {"category": "Materials", "budgeted": 200, "actual": 75},
-                    {"category": "A/V", "budgeted": 0, "actual": 0},
-                    {"category": "Contingency", "budgeted": 300, "actual": 0},
-                ],
-            },
-            "emergency_contacts": [
-                {"role": "Event Lead", "name": "Program Manager", "phone": "(555) 111-2222"},
-                {"role": "Venue Contact", "name": "Venue Manager", "phone": "(555) 123-4567"},
-                {"role": "Catering Contact", "name": "Catering Manager", "phone": "(555) 234-5678"},
-            ],
+            "budget_tracking": {"allocated": budget, "committed": None, "spent": None, "tracked": False},
+            "emergency_contacts": [{"role": r, "name": None, "phone": None}
+                                   for r in ("Event Lead", "Venue Contact", "Catering Contact")],
         }
 
-        requires_approval = self.requires_consensus("commit_budget")
-
         return SkillResponse(
-            content=f"Logistics plan created for event. Venue confirmed, catering pending. "
-                    f"Budget: ${logistics['budget_tracking']['allocated']:,.0f} allocated, "
-                    f"${logistics['budget_tracking']['committed']:,.0f} committed. "
-                    f"Need {logistics['staffing']['volunteers_needed'] - logistics['staffing']['volunteers_confirmed']} more volunteers.",
+            content=(f"Logistics checklist for a {event_type} of about {expected_attendance}: venue, catering, A/V, "
+                     f"staffing, materials and a day-of timeline, to fill in. "
+                     + not_connected("A venue booking system", "nothing is booked or confirmed and no money is committed")),
             success=True,
             data={"logistics": logistics},
-            requires_consensus=requires_approval,
-            consensus_action="commit_budget" if requires_approval else None,
-            suggestions=[
-                "Would you like to confirm the catering?",
-                "Should I send volunteer recruitment request?",
-                "Want to review the event timeline?",
-            ],
+            suggestions=["Draft an accessibility checklist"],
         )
 
     async def _check_accessibility(
@@ -587,147 +410,55 @@ class EventPlannerChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Check accessibility features and accommodations.
-
-        Reviews venue accessibility and planned accommodations.
-        """
+        """An accessibility checklist to confirm with the venue; nothing is checked, and no venue fact is invented."""
         event_id = request.entities.get("event_id", "")
-        venue = request.entities.get("venue", "Community Center Main Hall")
+        venue = request.entities.get("venue") or "the venue"
 
-        accessibility_features = [
-            AccessibilityFeature(
-                feature_id="acc_001",
-                category="mobility",
-                description="Wheelchair accessible entrance",
-                available=True,
-            ),
-            AccessibilityFeature(
-                feature_id="acc_002",
-                category="mobility",
-                description="Accessible parking spaces",
-                available=True,
-                notes="3 spaces available near main entrance",
-            ),
-            AccessibilityFeature(
-                feature_id="acc_003",
-                category="mobility",
-                description="Accessible restrooms",
-                available=True,
-            ),
-            AccessibilityFeature(
-                feature_id="acc_004",
-                category="mobility",
-                description="Elevator access to all floors",
-                available=True,
-            ),
-            AccessibilityFeature(
-                feature_id="acc_005",
-                category="hearing",
-                description="Hearing loop/assistive listening",
-                available=True,
-                notes="Portable system available upon request",
-            ),
-            AccessibilityFeature(
-                feature_id="acc_006",
-                category="hearing",
-                description="Sign language interpretation",
-                available=False,
-                notes="Can be arranged with 2 weeks notice",
-            ),
-            AccessibilityFeature(
-                feature_id="acc_007",
-                category="visual",
-                description="Large print materials",
-                available=True,
-                notes="Will prepare upon request",
-            ),
-            AccessibilityFeature(
-                feature_id="acc_008",
-                category="visual",
-                description="Screen reader compatible digital materials",
-                available=True,
-            ),
-            AccessibilityFeature(
-                feature_id="acc_009",
-                category="cognitive",
-                description="Quiet room available",
-                available=True,
-                notes="Room 105 designated as quiet space",
-            ),
-            AccessibilityFeature(
-                feature_id="acc_010",
-                category="dietary",
-                description="Dietary accommodations (vegan, gluten-free, etc.)",
-                available=True,
-                notes="Specify needs during registration",
-            ),
+        to_confirm = [
+            ("mobility", "Step-free, wheelchair-accessible entrance"),
+            ("mobility", "Accessible parking near the entrance"),
+            ("mobility", "Accessible restrooms"),
+            ("mobility", "Elevator access to every floor used"),
+            ("hearing", "Hearing loop or assistive listening"),
+            ("hearing", "Sign language interpretation (often needs about 2 weeks' notice)"),
+            ("visual", "Large print materials"),
+            ("visual", "Screen-reader-compatible digital materials"),
+            ("cognitive", "A quiet room"),
+            ("dietary", "Dietary accommodations, asked at registration"),
         ]
-
-        # Organize by category
-        by_category = {}
-        for feature in accessibility_features:
-            if feature.category not in by_category:
-                by_category[feature.category] = []
-            by_category[feature.category].append({
-                "feature_id": feature.feature_id,
-                "description": feature.description,
-                "available": feature.available,
-                "notes": feature.notes,
-            })
+        by_category: dict[str, list[dict[str, Any]]] = {}
+        for category, description in to_confirm:
+            by_category.setdefault(category, []).append(
+                {"description": description, "available": None, "notes": "not checked"})
 
         accessibility_data = {
             "event_id": event_id,
             "venue": venue,
-            "overall_assessment": "accessible_with_limitations",
+            "overall_assessment": None,
+            "checked": False,
             "features": by_category,
-            "available_count": len([f for f in accessibility_features if f.available]),
-            "unavailable_count": len([f for f in accessibility_features if not f.available]),
             "recommendations": [
-                {
-                    "recommendation": "Add accessibility question to registration form",
-                    "priority": "high",
-                    "status": "pending",
-                },
-                {
-                    "recommendation": "Arrange sign language interpretation if requested",
-                    "priority": "medium",
-                    "status": "pending",
-                    "lead_time": "2 weeks",
-                },
-                {
-                    "recommendation": "Prepare large print agendas and materials",
-                    "priority": "medium",
-                    "status": "pending",
-                },
-                {
-                    "recommendation": "Include accessibility information in event communications",
-                    "priority": "high",
-                    "status": "pending",
-                },
+                {"recommendation": "Add an accessibility question to the registration form", "priority": "high"},
+                {"recommendation": "Arrange sign language interpretation if requested", "priority": "medium",
+                 "lead_time": "about 2 weeks"},
+                {"recommendation": "Prepare large print agendas and materials", "priority": "medium"},
+                {"recommendation": "Include accessibility information in event communications", "priority": "high"},
             ],
-            "registration_requests": [
-                {"need": "wheelchair_access", "count": 1},
-                {"need": "dietary_vegetarian", "count": 3},
-                {"need": "dietary_gluten_free", "count": 1},
-            ],
+            "registration_requests": None,
             "accessibility_statement": (
                 "We are committed to making this event accessible to all attendees. "
-                "Please contact us at events@organization.org or (555) 123-4567 to request "
-                "accommodations or discuss your accessibility needs."
+                "Please contact us at [contact email or phone] to request accommodations or discuss your "
+                "accessibility needs."
             ),
         }
 
         return SkillResponse(
-            content=f"Accessibility check for {venue}: {accessibility_data['available_count']} features available, "
-                    f"{accessibility_data['unavailable_count']} may require advance arrangement. "
-                    f"Current registrations include {len(accessibility_data['registration_requests'])} accessibility requests.",
+            content=(f"Accessibility checklist for {venue}: {len(to_confirm)} things to confirm, none checked yet, "
+                     f"and a draft accessibility statement with your contact to fill in. "
+                     + not_connected("An accessibility checker", "I can't say what the venue offers")),
             success=True,
             data={"accessibility": accessibility_data},
-            suggestions=[
-                "Would you like to arrange sign language interpretation?",
-                "Should I add accessibility info to invitations?",
-                "Want to update the registration form?",
-            ],
+            suggestions=["Draft a follow-up message"],
         )
 
     async def _send_followup(
@@ -736,10 +467,7 @@ class EventPlannerChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Send post-event follow-up communications.
-
-        Generates and sends thank you messages, surveys, and impact updates.
-        """
+        """Draft a post-event follow-up with [gaps] for what only the organization knows. Nothing is sent or scheduled."""
         event_id = request.entities.get("event_id", "")
         followup_type = request.entities.get("followup_type", "thank_you")
         include_survey = request.entities.get("include_survey", True)
@@ -747,32 +475,22 @@ class EventPlannerChip(BaseSkillChip):
 
         now = datetime.now(timezone.utc)
 
-        # Generate follow-up content based on type
         followup_templates = {
             "thank_you": {
                 "subject": "Thank You for Attending [Event Name]!",
                 "opening": "Thank you for joining us at [Event Name]. We truly appreciate your participation and support.",
-                "highlights": [
-                    "Over 75 attendees joined us for this special event",
-                    "Together we raised $15,000 for our programs",
-                    "3 new volunteer partnerships were formed",
-                ],
+                "highlights": ["[A highlight from the event]", "[What it made possible]"],
                 "call_to_action": "Stay connected with us for future events and updates.",
             },
             "survey": {
                 "subject": "We'd Love Your Feedback on [Event Name]",
                 "opening": "Thank you for attending [Event Name]. Your feedback helps us improve future events.",
-                "survey_link": "https://survey.organization.org/event-feedback",
-                "incentive": "Complete the survey by [date] to be entered in a drawing for a $50 gift card.",
+                "survey_link": "[your survey link]",
             },
             "impact": {
                 "subject": "The Impact of [Event Name] - Thank You!",
                 "opening": "Thanks to your participation in [Event Name], we're excited to share the impact we've made together.",
-                "impact_metrics": [
-                    {"metric": "Funds raised", "value": "$15,000"},
-                    {"metric": "New donors", "value": "12"},
-                    {"metric": "Program beneficiaries supported", "value": "50 families"},
-                ],
+                "impact_metrics": [{"metric": "[What you measured]", "value": "[value]"}],
             },
         }
 
@@ -782,46 +500,34 @@ class EventPlannerChip(BaseSkillChip):
             "event_id": event_id,
             "followup_type": followup_type,
             "created_at": now.isoformat(),
-            "scheduled_send": (now + timedelta(hours=24)).isoformat(),
-            "recipients": {
-                "count": 75,
-                "segments": ["attendees", "donors", "volunteers"],
-            },
+            "scheduled_send": None,
+            "sent": False,
+            "recipients": {"count": None, "segments": ["attendees"]},
             "content": template,
             "attachments": [],
         }
 
         if include_photos:
-            followup_data["attachments"].append({
-                "type": "photo_gallery",
-                "description": "Event photos",
-                "count": 15,
-            })
+            followup_data["attachments"].append({"type": "photo_gallery", "description": "[Your event photos]"})
 
         if include_survey:
             followup_data["survey"] = {
-                "link": "https://survey.organization.org/event-feedback",
+                "link": "[your survey link]",
                 "questions": [
                     "Overall satisfaction (1-5)",
                     "Would you recommend this event?",
                     "What did you enjoy most?",
                     "How can we improve?",
                 ],
-                "deadline": (now + timedelta(days=7)).isoformat(),
             }
 
+        extras = [x for x, on in (("a feedback survey", include_survey), ("a place for photos", include_photos)) if on]
         return SkillResponse(
-            content=f"Prepared {followup_type} follow-up for {followup_data['recipients']['count']} recipients. "
-                    f"{'Includes feedback survey. ' if include_survey else ''}"
-                    f"{'Includes event photos. ' if include_photos else ''}"
-                    f"Scheduled to send in 24 hours.",
+            content=(f"Drafted a {followup_type.replace('_', ' ')} follow-up"
+                     + (f" with {' and '.join(extras)}" if extras else "")
+                     + ". Fill in the [bracketed] parts. "
+                     + not_connected("A messaging service", "nothing has been sent or scheduled")),
             success=True,
             data={"followup": followup_data},
-            requires_consensus=self.requires_consensus("send_invitations"),
-            consensus_action="send_invitations" if self.requires_consensus("send_invitations") else None,
-            suggestions=[
-                "Would you like to customize the message?",
-                "Should I send immediately instead of scheduling?",
-                "Want to segment recipients differently?",
-            ],
+            suggestions=["Would you like to customize the message?"],
         )

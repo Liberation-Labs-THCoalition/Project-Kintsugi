@@ -245,9 +245,8 @@ class TestBoardLiaisonChip:
             entities={"action": "list"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "resolutions" in response.data
-        assert "summary" in response.data
+        # No resolutions store: none listed, none invented (10-19: four hard-coded resolutions with votes)
+        assert response.success and response.data["resolutions"] == [] and response.data["connected"] is False
 
     @pytest.mark.asyncio
     async def test_handle_compliance_check(self, chip, context):
@@ -257,9 +256,9 @@ class TestBoardLiaisonChip:
             entities={"include_overdue": True},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "compliance_items" in response.data
-        assert "summary" in response.data
+        # Nothing checked: a checklist, every item "not checked", never "compliant" (10-19)
+        assert response.success and response.data["compliance_items"]
+        assert {c["status"] for c in response.data["compliance_items"]} == {"not checked"}
 
     @pytest.mark.asyncio
     async def test_handle_board_report(self, chip, context):
@@ -324,8 +323,9 @@ class TestDonorStewardshipChip:
         )
         response = await chip.handle(request, context)
         assert response.success
-        assert "acknowledgment" in response.data
-        assert "donor_summary" in response.data
+        # A draft from what it was given, not sent; no invented donor summary (10-19: every letter went to "Sarah")
+        ack = response.data["acknowledgment"]
+        assert ack["sent"] is False and "Sarah" not in response.content and "donor_summary" not in response.data
 
     @pytest.mark.asyncio
     async def test_handle_donor_profile(self, chip, context):
@@ -335,10 +335,8 @@ class TestDonorStewardshipChip:
             entities={"donor_id": "donor_001"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "profile" in response.data
-        assert "donor_level" in response.data["profile"]
-        assert "giving_summary" in response.data["profile"]
+        # No donor database: no profile is invented (10-19)
+        assert response.success and response.data["profile"] is None
 
     @pytest.mark.asyncio
     async def test_handle_giving_history(self, chip, context):
@@ -371,9 +369,8 @@ class TestDonorStewardshipChip:
             entities={"period": "quarterly"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "stewardship_report" in response.data
-        assert "summary" in response.data["stewardship_report"]
+        # No donor database: no report figures are invented (10-19)
+        assert response.success and response.data["stewardship_report"] is None
 
 
 # ==============================================================================
@@ -447,7 +444,7 @@ class TestStaffOnboardingChip:
         response = await chip.handle(request, context)
         assert response.success
         assert "policy_review" in response.data
-        assert "policies" in response.data["policy_review"]
+        assert "checklist" in response.data["policy_review"]
 
     @pytest.mark.asyncio
     async def test_handle_checklist_status(self, chip, context):
@@ -458,8 +455,8 @@ class TestStaffOnboardingChip:
         )
         response = await chip.handle(request, context)
         assert response.success
-        assert "onboarding_progress" in response.data
-        assert "overall_progress" in response.data["onboarding_progress"]
+        assert response.data["onboarding_progress"] is None      # no HR system: progress isn't known (10-19)
+        assert "isn't connected" in response.content
 
     @pytest.mark.asyncio
     async def test_handle_onboard_complete(self, chip, context):
@@ -470,8 +467,8 @@ class TestStaffOnboardingChip:
         )
         response = await chip.handle(request, context)
         result = await _approved(chip, response, context)       # completing onboarding is held until approved
-        assert result["success"]
-        assert "completion_record" in result["data"]
+        assert not result["success"] and "no step" in result["content"]     # no HR system to record it in (10-19)
+        assert result["data"]["completion_record"] is None
 
 
 # ==============================================================================
@@ -621,9 +618,8 @@ class TestMemberServicesChip:
             entities={"member_id": "mem_001"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "member" in response.data
-        assert "membership_tier" in response.data["member"]
+        # No member database is connected: no member is invented (10-19: every lookup returned "Jennifer Wilson")
+        assert response.success and response.data["member"] is None and "isn't connected" in response.content
 
     @pytest.mark.asyncio
     async def test_handle_membership_renew(self, chip, context):
@@ -634,9 +630,9 @@ class TestMemberServicesChip:
         )
         response = await chip.handle(request, context)
         result = await _approved(chip, response, context)       # a renewal charges for a tier: held, two approvers
-        assert result["success"]
-        assert "renewal" in result["data"]
-        assert result["data"]["renewal"]["tier"] == "gold"
+        # No payment processor is connected: approval charges nothing, and the chip says it has no step (10-19)
+        assert not result["success"] and "no step that carries out change_membership_tier" in result["content"]
+        assert result["data"]["renewal"]["charged"] is False and result["data"]["renewal"]["processed"] is False
 
     @pytest.mark.asyncio
     async def test_handle_benefits_info(self, chip, context):
@@ -668,9 +664,8 @@ class TestMemberServicesChip:
             entities={"period": "monthly", "include_trends": True},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "membership_report" in response.data
-        assert "trends" in response.data["membership_report"]
+        # No member database: no counts, revenue or trends are invented (10-19)
+        assert response.success and response.data["membership_report"] is None
 
     @pytest.mark.asyncio
     async def test_membership_report_includes_recommendations(self, chip, context):
@@ -680,9 +675,7 @@ class TestMemberServicesChip:
             entities={"period": "monthly"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "recommendations" in response.data["membership_report"]
-        assert len(response.data["membership_report"]["recommendations"]) > 0
+        assert response.success and "isn't connected" in response.content and "$" not in response.content
 
 
 # ==============================================================================
@@ -808,10 +801,8 @@ class TestResponseStructure:
         response = await chip.handle(request, context)
 
         packet = response.data["meeting_packet"]
-        assert "packet_id" in packet
-        assert "meeting" in packet
-        assert "agenda_items" in packet
-        assert "attachments" in packet
+        assert "meeting" in packet and "agenda_items" in packet and "to_gather" in packet
+        assert packet["meeting"]["virtual_link"] is None and packet["action_items_from_prior"] is None
 
         # Verify agenda item structure
         for item in packet["agenda_items"]:
@@ -830,12 +821,7 @@ class TestResponseStructure:
         response = await chip.handle(request, context)
 
         profile = response.data["profile"]
-        assert "donor_id" in profile
-        assert "name" in profile
-        assert "email" in profile
-        assert "donor_level" in profile
-        assert "giving_summary" in profile
-        assert "engagement" in profile
+        assert profile is None
 
     @pytest.mark.asyncio
     async def test_staff_onboarding_plan_structure(self, context):
@@ -866,15 +852,8 @@ class TestResponseStructure:
 
         rsvp_data = response.data["rsvp_data"]
         assert "event_id" in rsvp_data
-        assert "rsvps" in rsvp_data
-        assert "summary" in rsvp_data
-        assert "special_needs" in rsvp_data
-
-        # Verify summary structure
-        summary = rsvp_data["summary"]
-        assert "confirmed" in summary
-        assert "tentative" in summary
-        assert "declined" in summary
+        assert rsvp_data["rsvps"] == []                 # no RSVP system: nobody is listed, nobody invented (10-19)
+        assert rsvp_data["summary"] is None and rsvp_data["connected"] is False
 
     @pytest.mark.asyncio
     async def test_member_services_membership_structure(self, context):
@@ -886,13 +865,7 @@ class TestResponseStructure:
         )
         response = await chip.handle(request, context)
 
-        member = response.data["member"]
-        assert "member_id" in member
-        assert "name" in member
-        assert "membership_tier" in member
-        assert "status" in member
-        assert "tier_benefits" in member
-        assert "engagement" in member
+        assert response.data["member"] is None and response.data["connected"] is False
 
 
 # ==============================================================================
@@ -933,7 +906,7 @@ class TestEdgeCases:
         )
         response = await chip.handle(request, context)
         result = await _approved(chip, response, context)       # held first; the chip's own check runs once approved
-        assert "completion_status" in result["data"] or "completion_record" in result["data"]
+        assert result["data"]["recorded"] is False and not result["success"]
 
     @pytest.mark.asyncio
     async def test_board_liaison_resolution_filtering(self, context):

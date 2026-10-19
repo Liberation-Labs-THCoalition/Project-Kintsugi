@@ -83,10 +83,25 @@ def test_the_approve_route_counts_people(make_headers):
 
 # ---- mass notices, per requester per day -----------------------------------------------------------------------------
 
-def _notify(ids, user="key:k-asker"):
+def _test_roster(org_id):
+    from kintsugi.skills.core_ops.volunteer_coordinator import Volunteer
+    return [Volunteer(id=f"vol_00{i}", name=f"Volunteer {i}", email=f"v{i}@example.test") for i in (1, 2, 3)]
+
+
+async def _always_delivered(volunteer, channel, message):
+    return True
+
+
+def _volunteer_chip():
+    """The chip with a roster and a sender, as a deployment connects them: only real sends count toward the limit
+    (10-19: with nothing connected, nothing is sent and nothing counts)."""
     from kintsugi.skills.core_ops.volunteer_coordinator import VolunteerCoordinatorChip
-    return VolunteerCoordinatorChip, SkillRequest(intent="volunteer_notify", raw_input="n",
-                                                  entities={"volunteer_ids": ids, "message": "Shift moved"}), ctx(user=user)
+    return VolunteerCoordinatorChip(roster=_test_roster, sender=_always_delivered)
+
+
+def _notify(ids, user="key:k-asker"):
+    return _volunteer_chip, SkillRequest(intent="volunteer_notify", raw_input="n",
+                                         entities={"volunteer_ids": ids, "message": "Shift moved"}), ctx(user=user)
 
 
 @pytest.mark.asyncio

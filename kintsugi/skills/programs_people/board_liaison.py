@@ -25,6 +25,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -133,6 +134,10 @@ class BoardLiaisonChip(BaseSkillChip):
     }
 
     required_spans = ["document_templates", "calendar_api", "voting_system"]
+    # Honest without its spans (kintsugi/skills/honesty.py): agendas, minutes and reports are drafts built from what
+    # they're given, with [bracketed] gaps for the rest. No attendee, motion, vote, filing status or figure is
+    # invented, and nothing is stored or distributed.
+    simulated = False
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -222,9 +227,9 @@ class BoardLiaisonChip(BaseSkillChip):
             meeting_id=f"mtg_{uuid4().hex[:8]}",
             meeting_type=meeting_type,
             scheduled_date=datetime.fromisoformat(meeting_date) if isinstance(meeting_date, str) else meeting_date,
-            location="Main Conference Room",
-            virtual_link="https://zoom.us/j/123456789",
-            quorum_required=5,
+            location=request.entities.get("location") or "[Location]",
+            virtual_link=request.entities.get("virtual_link"),
+            quorum_required=request.entities.get("quorum") or 0,
         )
 
         # Build agenda based on meeting type
@@ -242,7 +247,7 @@ class BoardLiaisonChip(BaseSkillChip):
                 "presenter": "Board Secretary",
                 "duration_minutes": 5,
                 "type": "action",
-                "attachments": ["minutes_2024_02_15.pdf"],
+                "attachments": ["[The prior meeting's minutes]"],
             },
         ]
 
@@ -253,7 +258,7 @@ class BoardLiaisonChip(BaseSkillChip):
                 "presenter": "Treasurer",
                 "duration_minutes": 15,
                 "type": "report",
-                "attachments": ["financial_statement_q1.pdf", "budget_variance_report.pdf"],
+                "attachments": ["[Current financial statements]", "[Budget against actuals]"],
             })
 
         agenda_items.extend([
@@ -278,7 +283,7 @@ class BoardLiaisonChip(BaseSkillChip):
                 "presenter": "Board Chair",
                 "duration_minutes": 15,
                 "type": "discussion",
-                "items": ["Strategic plan implementation update", "Building lease renewal status"],
+                "items": ["[Open items from the prior minutes]"],
             },
             {
                 "item_number": 7,
@@ -309,23 +314,17 @@ class BoardLiaisonChip(BaseSkillChip):
                 "quorum_required": meeting.quorum_required,
             },
             "agenda_items": agenda_items,
-            "attachments": [
-                {"name": "Prior Meeting Minutes", "filename": "minutes_2024_02_15.pdf"},
-                {"name": "Financial Statements", "filename": "financial_statement_q1.pdf"},
-                {"name": "ED Report", "filename": "ed_report_march.pdf"},
-            ],
-            "action_items_from_prior": [
-                {"item": "Review insurance coverage", "responsible": "Treasurer", "status": "complete"},
-                {"item": "Schedule strategic planning retreat", "responsible": "ED", "status": "in_progress"},
-            ],
+            "to_gather": ["Prior meeting minutes", "Financial statements", "Executive Director's report"],
+            "action_items_from_prior": None,       # no store of past meetings is connected
             "total_duration_minutes": sum(item["duration_minutes"] for item in agenda_items),
         }
 
         requires_approval = self.requires_consensus("distribute_materials")
 
         return SkillResponse(
-            content=f"Prepared {meeting_type} board meeting packet for {meeting.scheduled_date.strftime('%B %d, %Y')}. "
-                    f"Agenda includes {len(agenda_items)} items with estimated duration of {packet['total_duration_minutes']} minutes.",
+            content=(f"Draft {meeting_type} board agenda for {meeting.scheduled_date.strftime('%B %d, %Y')}: "
+                     f"{len(agenda_items)} items, about {packet['total_duration_minutes']} minutes. Fill the [bracketed] "
+                     f"parts and gather the papers listed. Nothing has been distributed."),
             success=True,
             data={"meeting_packet": packet},
             requires_consensus=requires_approval,
@@ -333,7 +332,6 @@ class BoardLiaisonChip(BaseSkillChip):
             suggestions=[
                 "Should I add any additional agenda items?",
                 "Would you like to include a consent agenda?",
-                "Ready to distribute to board members?",
             ],
         )
 
@@ -353,82 +351,41 @@ class BoardLiaisonChip(BaseSkillChip):
         attendees = request.entities.get("attendees", [])
 
         minutes = {
-            "minutes_id": f"min_{uuid4().hex[:8]}",
             "meeting_id": meeting_id,
             "status": "draft",
-            "created_at": datetime.now(timezone.utc).isoformat(),
             "header": {
                 "organization": context.org_id,
-                "meeting_type": "Regular Board Meeting",
-                "date": datetime.now(timezone.utc).strftime("%B %d, %Y"),
-                "location": "Main Conference Room / Virtual",
-                "call_to_order": "6:00 PM",
-                "adjournment": "7:45 PM",
+                "meeting_type": request.entities.get("meeting_type") or "[Meeting type]",
+                "date": request.entities.get("date") or "[Date]",
+                "location": request.entities.get("location") or "[Location]",
+                "call_to_order": "[Time]",
+                "adjournment": "[Time]",
             },
             "attendance": {
-                "present": attendees or ["J. Smith (Chair)", "M. Johnson", "A. Williams", "R. Brown", "S. Davis"],
-                "absent": ["L. Martinez (excused)"],
-                "staff_present": ["T. Chen (ED)", "K. Patel (CFO)"],
-                "guests": [],
-                "quorum_achieved": True,
+                "present": attendees or ["[Names of those present]"],
+                "absent": ["[Names of those absent]"],
+                "quorum_achieved": "[Yes or no]",
             },
+            "notes_given": notes or None,
             "proceedings": [
-                {
-                    "item": "Call to Order",
-                    "notes": "Chair J. Smith called the meeting to order at 6:00 PM.",
-                    "type": "procedural",
-                },
-                {
-                    "item": "Approval of Minutes",
-                    "notes": "Minutes from February 15, 2024 meeting were reviewed.",
-                    "motion": "Motion to approve minutes as presented",
-                    "moved_by": "M. Johnson",
-                    "seconded_by": "A. Williams",
-                    "vote": {"for": 5, "against": 0, "abstain": 0},
-                    "result": "Approved unanimously",
-                    "type": "action",
-                },
-                {
-                    "item": "Financial Report",
-                    "notes": "Treasurer presented Q1 financial statements showing organization is on budget with 3% variance.",
-                    "type": "report",
-                },
-                {
-                    "item": "New Business - Policy Update",
-                    "notes": "Board discussed proposed updates to conflict of interest policy.",
-                    "motion": "Motion to adopt revised conflict of interest policy",
-                    "moved_by": "R. Brown",
-                    "seconded_by": "S. Davis",
-                    "vote": {"for": 5, "against": 0, "abstain": 0},
-                    "result": "Approved unanimously",
-                    "type": "action",
-                },
+                {"item": "Call to order", "notes": "[Who called the meeting to order, and when]"},
+                {"item": "Approval of prior minutes",
+                 "motion": "[Motion as stated]", "moved_by": "[Name]", "seconded_by": "[Name]",
+                 "vote": "[For / against / abstain]", "result": "[Result]"},
+                {"item": "Reports", "notes": "[What was reported, by whom]"},
+                {"item": "Business", "notes": "[Each motion as stated, mover, seconder, vote and result]"},
             ],
-            "action_items": [
-                {
-                    "action": "Distribute updated conflict of interest policy to all board members",
-                    "responsible": "Board Secretary",
-                    "due_date": (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d"),
-                },
-                {
-                    "action": "Schedule Q2 finance committee meeting",
-                    "responsible": "Treasurer",
-                    "due_date": (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d"),
-                },
-            ],
-            "next_meeting": (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%B %d, %Y"),
+            "action_items": ["[Action, who, by when]"],
         }
 
         return SkillResponse(
-            content=f"Drafted minutes for {minutes['header']['meeting_type']} held on {minutes['header']['date']}. "
-                    f"Includes {len(minutes['proceedings'])} proceedings items and {len(minutes['action_items'])} action items.",
+            content=("Draft minutes: a template with the attendees and notes you gave"
+                     + (" filled in" if (attendees or notes) else "")
+                     + ". Motions, votes and times are left as [bracketed] gaps for the secretary: none is invented. "
+                       "Not circulated."),
             success=True,
             data={"minutes": minutes},
-            suggestions=[
-                "Would you like to add any corrections?",
-                "Should I format for board review?",
-                "Ready to circulate for approval?",
-            ],
+            suggestions=["Would you like to add any corrections?"],
         )
 
     async def _track_resolutions(
@@ -445,91 +402,15 @@ class BoardLiaisonChip(BaseSkillChip):
         action = request.entities.get("action", "list")  # list, update, create
         status_filter = request.entities.get("status", None)
 
-        # Simulated resolutions (would pull from data store)
-        resolutions = [
-            Resolution(
-                resolution_id="res_001",
-                title="FY2024 Budget Approval",
-                description="Approve operating budget for fiscal year 2024",
-                status="approved",
-                meeting_id="mtg_001",
-                vote_count={"for": 6, "against": 0, "abstain": 1},
-                effective_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
-                responsible_party="CFO",
-            ),
-            Resolution(
-                resolution_id="res_002",
-                title="Conflict of Interest Policy Update",
-                description="Adopt revised conflict of interest policy",
-                status="approved",
-                meeting_id="mtg_002",
-                vote_count={"for": 5, "against": 0, "abstain": 0},
-                effective_date=datetime(2024, 3, 15, tzinfo=timezone.utc),
-                responsible_party="Board Secretary",
-            ),
-            Resolution(
-                resolution_id="res_003",
-                title="Strategic Plan Adoption",
-                description="Adopt 2024-2027 strategic plan",
-                status="pending",
-                meeting_id="mtg_003",
-                vote_count={},
-                responsible_party="Executive Director",
-            ),
-            Resolution(
-                resolution_id="res_004",
-                title="Executive Session - Personnel Matter",
-                description="Personnel matter discussed in executive session",
-                status="tabled",
-                meeting_id="mtg_002",
-                vote_count={},
-                responsible_party="Board Chair",
-            ),
-        ]
-
-        # Filter by status if requested
-        if status_filter:
-            resolutions = [r for r in resolutions if r.status == status_filter]
-
-        resolution_data = [
-            {
-                "resolution_id": r.resolution_id,
-                "title": r.title,
-                "description": r.description,
-                "status": r.status,
-                "meeting_id": r.meeting_id,
-                "vote": r.vote_count,
-                "effective_date": r.effective_date.isoformat() if r.effective_date else None,
-                "responsible_party": r.responsible_party,
-            }
-            for r in resolutions
-        ]
-
-        status_summary = {
-            "approved": len([r for r in resolutions if r.status == "approved"]),
-            "pending": len([r for r in resolutions if r.status == "pending"]),
-            "tabled": len([r for r in resolutions if r.status == "tabled"]),
-            "rejected": len([r for r in resolutions if r.status == "rejected"]),
-        }
-
+        # No voting_system or data store is wired yet: no resolution is listed, recorded or invented.
         requires_approval = self.requires_consensus("record_resolution") if action == "create" else False
-
         return SkillResponse(
-            content=f"Tracking {len(resolutions)} board resolutions. "
-                    f"{status_summary['approved']} approved, {status_summary['pending']} pending, "
-                    f"{status_summary['tabled']} tabled.",
+            content=not_connected("A resolutions store", "I have no resolutions to list or update"),
             success=True,
-            data={
-                "resolutions": resolution_data,
-                "summary": status_summary,
-            },
+            data={"resolutions": [], "connected": False},
             requires_consensus=requires_approval,
             consensus_action="record_resolution" if requires_approval else None,
-            suggestions=[
-                "Want to see details on a specific resolution?",
-                "Should I create a new resolution?",
-                "Would you like to update a resolution status?",
-            ],
+            suggestions=[],
         )
 
     async def _check_compliance(
@@ -546,101 +427,26 @@ class BoardLiaisonChip(BaseSkillChip):
         category = request.entities.get("category", None)
         include_overdue = request.entities.get("include_overdue", True)
 
-        compliance_items = [
-            ComplianceItem(
-                item_id="comp_001",
-                requirement="Annual Form 990 Filing",
-                category="legal",
-                due_date=datetime(2024, 5, 15, tzinfo=timezone.utc),
-                status="pending",
-                responsible_party="CFO",
-                documentation=["form_990_draft.pdf"],
-            ),
-            ComplianceItem(
-                item_id="comp_002",
-                requirement="State Charitable Registration Renewal",
-                category="regulatory",
-                due_date=datetime(2024, 6, 30, tzinfo=timezone.utc),
-                status="compliant",
-                responsible_party="ED",
-                documentation=["state_registration_2024.pdf"],
-            ),
-            ComplianceItem(
-                item_id="comp_003",
-                requirement="Board Member Conflict of Interest Disclosure",
-                category="fiduciary",
-                due_date=datetime(2024, 1, 31, tzinfo=timezone.utc),
-                status="overdue",
-                responsible_party="Board Secretary",
-                documentation=[],
-            ),
-            ComplianceItem(
-                item_id="comp_004",
-                requirement="D&O Insurance Renewal",
-                category="fiduciary",
-                due_date=datetime(2024, 4, 1, tzinfo=timezone.utc),
-                status="compliant",
-                responsible_party="CFO",
-                documentation=["do_insurance_policy.pdf"],
-            ),
-            ComplianceItem(
-                item_id="comp_005",
-                requirement="Bylaws Review",
-                category="policy",
-                due_date=datetime(2024, 12, 31, tzinfo=timezone.utc),
-                status="pending",
-                responsible_party="Governance Committee",
-                documentation=["current_bylaws.pdf"],
-            ),
+        # No compliance tracker is wired yet: nothing is checked, so nothing is called compliant or overdue. A checklist
+        # of common requirements, each "not checked", for the board to verify.
+        checklist = [
+            {"requirement": "Annual IRS Form 990 (most tax-exempt organizations)", "category": "legal"},
+            {"requirement": "State charitable registration, where your state requires it", "category": "regulatory"},
+            {"requirement": "Board conflict-of-interest disclosures", "category": "fiduciary"},
+            {"requirement": "Directors and officers insurance", "category": "fiduciary"},
+            {"requirement": "Bylaws review", "category": "policy"},
         ]
-
-        # Filter by category if specified
         if category:
-            compliance_items = [c for c in compliance_items if c.category == category]
-
-        # Filter out completed if not including overdue
-        if not include_overdue:
-            compliance_items = [c for c in compliance_items if c.status != "overdue"]
-
-        compliance_data = [
-            {
-                "item_id": c.item_id,
-                "requirement": c.requirement,
-                "category": c.category,
-                "due_date": c.due_date.isoformat(),
-                "status": c.status,
-                "responsible_party": c.responsible_party,
-                "documentation": c.documentation,
-                "days_until_due": (c.due_date - datetime.now(timezone.utc)).days,
-            }
-            for c in compliance_items
-        ]
-
-        status_summary = {
-            "compliant": len([c for c in compliance_items if c.status == "compliant"]),
-            "pending": len([c for c in compliance_items if c.status == "pending"]),
-            "overdue": len([c for c in compliance_items if c.status == "overdue"]),
-        }
-
-        overdue_items = [c for c in compliance_data if c["status"] == "overdue"]
-        upcoming_items = [c for c in compliance_data if 0 < c["days_until_due"] <= 30]
-
+            checklist = [c for c in checklist if c["category"] == category]
+        for c in checklist:
+            c["status"] = "not checked"
         return SkillResponse(
-            content=f"Checked {len(compliance_items)} compliance requirements. "
-                    f"{status_summary['compliant']} compliant, {status_summary['pending']} pending, "
-                    f"{status_summary['overdue']} overdue. {len(upcoming_items)} items due within 30 days.",
+            content=(f"{not_connected('A compliance tracker', 'I have not checked any filing or deadline')} A checklist "
+                     f"of {len(checklist)} common requirements, each still to be checked, with its due date in your "
+                     f"own records."),
             success=True,
-            data={
-                "compliance_items": compliance_data,
-                "summary": status_summary,
-                "overdue": overdue_items,
-                "upcoming": upcoming_items,
-            },
-            suggestions=[
-                "Want to address the overdue items?",
-                "Should I set up reminders for upcoming deadlines?",
-                "Would you like a compliance calendar?",
-            ],
+            data={"compliance_items": checklist, "connected": False},
+            suggestions=[],
         )
 
     async def _generate_board_report(
@@ -659,80 +465,26 @@ class BoardLiaisonChip(BaseSkillChip):
         include_programs = request.entities.get("include_programs", True)
 
         report = {
-            "report_id": f"br_{uuid4().hex[:8]}",
             "period": report_period,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "executive_summary": (
-                "The organization remains on solid footing with stable finances, "
-                "strong program outcomes, and engaged board governance. Key highlights "
-                "include exceeding fundraising targets by 12% and launching two new programs."
-            ),
-            "organizational_health": {
-                "overall_status": "healthy",
-                "staff_retention": "92%",
-                "volunteer_engagement": "245 active volunteers",
-                "partner_organizations": "12 active partnerships",
-            },
+            "executive_summary": "[Two or three sentences on the period, in your own figures]",
+            "organizational_health": {"staff": "[Staffing changes]", "volunteers": "[Volunteer figures]",
+                                      "partners": "[Partnerships]"},
+            "governance_status": {"attendance": "[Board attendance]", "resolutions": "[Resolutions passed]",
+                                  "compliance": "[Anything due or overdue]"},
+            "risks_and_opportunities": "[Risks, with mitigations; opportunities, with next steps]",
         }
-
         if include_financials:
-            report["financial_summary"] = {
-                "total_revenue_ytd": 1250000,
-                "total_expenses_ytd": 1125000,
-                "net_position": 125000,
-                "budget_variance": "+3.2%",
-                "months_operating_reserve": 4.5,
-                "key_metrics": [
-                    {"metric": "Fundraising ROI", "value": "4.2:1"},
-                    {"metric": "Program expense ratio", "value": "82%"},
-                    {"metric": "Admin expense ratio", "value": "12%"},
-                ],
-            }
-
+            report["financial_summary"] = {"revenue_ytd": "[From your books]", "expenses_ytd": "[From your books]",
+                                           "reserve": "[Months of operating reserve]"}
         if include_programs:
-            report["program_summary"] = {
-                "active_programs": 5,
-                "participants_served_ytd": 1850,
-                "completion_rate": "88%",
-                "satisfaction_score": "4.3/5.0",
-                "highlights": [
-                    "Youth mentorship program expanded to 3 new schools",
-                    "Workforce development achieved 72% job placement rate",
-                    "Community health initiative served 450 families",
-                ],
-            }
-
-        report["governance_status"] = {
-            "board_attendance_avg": "85%",
-            "committees_active": 4,
-            "resolutions_ytd": 8,
-            "compliance_status": "1 overdue item requiring attention",
-            "upcoming": [
-                "Annual board retreat scheduled for May 2024",
-                "Strategic plan review at next meeting",
-            ],
-        }
-
-        report["risks_and_opportunities"] = {
-            "risks": [
-                {"risk": "Key grant renewal uncertain", "mitigation": "Diversifying funding sources"},
-                {"risk": "Rising facility costs", "mitigation": "Exploring alternative locations"},
-            ],
-            "opportunities": [
-                {"opportunity": "New foundation interest", "action": "Schedule introductory meetings"},
-                {"opportunity": "Partnership with city government", "action": "Submit proposal by Q2"},
-            ],
-        }
+            report["program_summary"] = {"programs": "[Active programs]", "results": "[Results, in your own numbers]"}
 
         return SkillResponse(
-            content=f"Generated {report_period} board report covering organizational health, "
-                    f"{'financials, ' if include_financials else ''}{'programs, ' if include_programs else ''}"
-                    f"governance status, and risks/opportunities.",
+            content=(f"Draft {report_period} board report outline: organizational health, "
+                     f"{'financials, ' if include_financials else ''}{'programs, ' if include_programs else ''}"
+                     f"governance, and risks and opportunities. Every figure is a [bracketed] gap to fill from your own "
+                     f"records: none is invented."),
             success=True,
             data={"board_report": report},
-            suggestions=[
-                "Would you like to customize any sections?",
-                "Should I prepare a presentation version?",
-                "Ready to include in the board packet?",
-            ],
+            suggestions=["Would you like to customize any sections?"],
         )

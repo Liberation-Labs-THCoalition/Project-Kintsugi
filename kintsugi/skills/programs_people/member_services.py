@@ -25,6 +25,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -121,11 +122,12 @@ class MemberServicesChip(BaseSkillChip):
     consensus_intents = {"member_communicate": "bulk_communication", "membership_renew": "change_membership_tier"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"bulk_communication": "EXTERNAL_COMMS", "change_membership_tier": "FINANCIAL"}
-    consensus_no_step = {"bulk_communication": "nothing sends member messages"}
+    consensus_no_step = {"bulk_communication": "nothing sends member messages",
+                         "change_membership_tier": "no payment processor is connected, so nothing is charged"}
     consensus_when = {
         "member_communicate": lambda r: bool(r.entities.get("bulk", False)),
         # an unknown tier gets the chip's own refusal at once, not a wait for two approvers
-        "membership_renew": lambda r: r.entities.get("tier", "basic") in MemberServicesChip._tiers,
+        "membership_renew": "_asks_renewal",
     }
     consensus_unreachable = {
         "process_refund": "no intent performs this yet: declared for a future one, so it can't happen ungated",
@@ -133,7 +135,19 @@ class MemberServicesChip(BaseSkillChip):
 
     required_spans = ["membership_db", "payment_processor", "email_service"]
 
-    # Define membership tiers
+    # Honesty (kintsugi/skills/honesty.py): no member, payment, message or report is invented. The tiers below are an
+    # EXAMPLE catalogue, so the chip stays in Sample mode until a deployment passes its own:
+    # MemberServicesChip(tiers={...}). Renewals take no payment (no payment processor is connected) and say so.
+    def __init__(self, tiers: dict | None = None) -> None:
+        super().__init__()
+        if tiers is not None:
+            self._tiers = dict(tiers)
+            self.simulated = False            # the organization's own catalogue: nothing here is sample any more
+
+    def _asks_renewal(self, request, context) -> bool:
+        return request.entities.get("tier", "basic") in self._tiers
+
+    # An example membership catalogue (not any organization's): replaced by MemberServicesChip(tiers=...).
     _tiers = {
         "basic": MembershipTier(
             tier_id="tier_basic",
@@ -270,79 +284,13 @@ class MemberServicesChip(BaseSkillChip):
         email = request.entities.get("email", "")
         name = request.entities.get("name", "")
 
-        # Simulated member lookup (would query membership database)
-        member = Member(
-            member_id=member_id or f"mem_{uuid4().hex[:8]}",
-            name=name or "Jennifer Wilson",
-            email=email or "jennifer.wilson@email.com",
-            phone="(555) 987-6543",
-            membership_tier="gold",
-            status="active",
-            join_date=datetime(2021, 3, 15, tzinfo=timezone.utc),
-            expiration_date=datetime(2024, 3, 15, tzinfo=timezone.utc),
-            auto_renew=True,
-            payment_method="credit_card",
-            communication_preferences={
-                "email_newsletter": True,
-                "event_notifications": True,
-                "renewal_reminders": True,
-                "sms_alerts": False,
-            },
-        )
-
-        now = datetime.now(timezone.utc)
-        days_until_expiration = (member.expiration_date - now).days if member.expiration_date else None
-
-        # Simulated engagement history
-        engagement_history = [
-            {"date": "2024-01-15", "activity": "Attended monthly networking event", "type": "event"},
-            {"date": "2023-12-10", "activity": "Renewed membership", "type": "renewal"},
-            {"date": "2023-11-20", "activity": "Attended annual gala", "type": "event"},
-            {"date": "2023-09-05", "activity": "Volunteered at community cleanup", "type": "volunteer"},
-            {"date": "2023-06-15", "activity": "Attended quarterly workshop", "type": "event"},
-        ]
-
-        member_data = {
-            "member_id": member.member_id,
-            "name": member.name,
-            "email": member.email,
-            "phone": member.phone,
-            "membership_tier": member.membership_tier,
-            "tier_benefits": self._tiers[member.membership_tier].benefits,
-            "annual_fee": self._tiers[member.membership_tier].annual_fee,
-            "status": member.status,
-            "join_date": member.join_date.isoformat() if member.join_date else None,
-            "expiration_date": member.expiration_date.isoformat() if member.expiration_date else None,
-            "days_until_expiration": days_until_expiration,
-            "auto_renew": member.auto_renew,
-            "payment_method": member.payment_method,
-            "communication_preferences": member.communication_preferences,
-            "engagement": {
-                "member_since_years": (now.year - member.join_date.year) if member.join_date else 0,
-                "events_attended_ytd": 3,
-                "volunteer_hours_ytd": 8,
-                "recent_activities": engagement_history[:5],
-            },
-            "notes": [
-                "Board committee interest expressed in 2023",
-                "Referred 2 new members",
-            ],
-        }
-
-        renewal_alert = ""
-        if days_until_expiration and days_until_expiration <= 30:
-            renewal_alert = f" ALERT: Membership expires in {days_until_expiration} days."
-
+        # No membership_db span is wired yet: no member is looked up, and none is made up.
+        who = member_id or email or name or "that member"
         return SkillResponse(
-            content=f"Found member {member.name} ({member.membership_tier} tier, {member.status}). "
-                    f"Member since {member.join_date.year if member.join_date else 'N/A'}.{renewal_alert}",
+            content=not_connected("A member database", f"I can't look up {who}"),
             success=True,
-            data={"member": member_data},
-            suggestions=[
-                "Would you like to process a renewal?",
-                "Should I send membership information?",
-                "Want to update member preferences?",
-            ],
+            data={"member": None, "connected": False},
+            suggestions=["Show membership tiers"],
         )
 
     async def _process_renewal(
@@ -368,47 +316,20 @@ class MemberServicesChip(BaseSkillChip):
             )
 
         tier_info = self._tiers[tier]
-        now = datetime.now(timezone.utc)
-        new_expiration = now + timedelta(days=365)
-
-        renewal_data = {
-            "transaction_id": f"txn_{uuid4().hex[:8]}",
-            "member_id": member_id,
-            "transaction_type": "new_membership" if is_new else "renewal",
-            "tier": tier,
-            "amount": tier_info.annual_fee,
-            "payment_method": payment_method,
-            "processed_at": now.isoformat(),
-            "new_expiration_date": new_expiration.isoformat(),
-            "auto_renew_enabled": auto_renew,
-            "benefits_activated": tier_info.benefits,
-            "confirmation": {
-                "confirmation_number": f"CONF-{uuid4().hex[:8].upper()}",
-                "receipt_sent": True,
-                "welcome_email_queued": is_new,
-            },
-            "next_steps": [
-                "Confirmation email sent to member",
-                "Member card will be mailed within 5-7 business days" if tier in ["gold", "platinum"] else None,
-                "Login credentials sent (new members)" if is_new else None,
-            ],
-        }
-
-        # Remove None items from next_steps
-        renewal_data["next_steps"] = [s for s in renewal_data["next_steps"] if s]
-
         action_type = "New membership" if is_new else "Renewal"
-
+        # No payment_processor or membership_db span is wired yet: nothing is charged and no membership changes. The
+        # approved run asks again, so the consumer records "no step" (consensus_no_step) instead of a success.
         return SkillResponse(
-            content=f"{action_type} processed successfully! {tier_info.name} membership for "
-                    f"${tier_info.annual_fee:.2f}. Valid through {new_expiration.strftime('%B %d, %Y')}.",
-            success=True,
-            data={"renewal": renewal_data},
-            suggestions=[
-                "Would you like to send a welcome packet?",
-                "Should I schedule a new member orientation?",
-                "Want to add any notes to the member record?",
-            ],
+            content=(f"{action_type} not processed: "
+                     f"{not_connected('A payment processor', 'no payment was taken and the membership has not changed')} "
+                     f"{tier_info.name} is ${tier_info.annual_fee:.2f} a year"
+                     + (" (example tier: your organization's own tiers aren't configured)." if self.simulated else ".")),
+            success=False,
+            data={"renewal": {"member_id": member_id, "tier": tier, "processed": False, "charged": False,
+                              "auto_renew_requested": auto_renew}},
+            requires_consensus=True,
+            consensus_action="change_membership_tier",
+            suggestions=["Show membership tiers"],
         )
 
     async def _get_benefits(
@@ -437,11 +358,10 @@ class MemberServicesChip(BaseSkillChip):
                 },
             }
 
-            # Include upgrade option if not platinum
-            if tier != "platinum":
-                tier_order = ["basic", "silver", "gold", "platinum"]
-                current_idx = tier_order.index(tier)
-                next_tier = tier_order[current_idx + 1]
+            # The next tier up by fee, whatever the organization calls its tiers (the example names were hard-coded)
+            tier_order = sorted(self._tiers, key=lambda name: self._tiers[name].annual_fee)
+            if tier_order.index(tier) + 1 < len(tier_order):
+                next_tier = tier_order[tier_order.index(tier) + 1]
                 next_tier_info = self._tiers[next_tier]
 
                 benefits_data["upgrade_option"] = {
@@ -459,8 +379,7 @@ class MemberServicesChip(BaseSkillChip):
                 success=True,
                 data={"benefits": benefits_data},
                 suggestions=[
-                    f"Would you like to upgrade to {benefits_data.get('upgrade_option', {}).get('next_tier', 'higher tier')}?" if tier != "platinum" else "This is our highest tier!",
-                    "Should I send benefits information to a member?",
+                    "Compare all tiers",
                 ],
             )
 
@@ -488,29 +407,24 @@ class MemberServicesChip(BaseSkillChip):
                 "VIP access": {"basic": False, "silver": False, "gold": False, "platinum": True},
                 "Board participation": {"basic": False, "silver": False, "gold": False, "platinum": True},
             },
-            "most_popular": "silver",
-            "best_value": "gold",
         }
 
         return SkillResponse(
-            content=f"Membership benefits comparison across {len(self._tiers)} tiers. "
-                    f"Most popular: Silver. Best value: Gold.",
+            content=f"Membership benefits comparison across {len(self._tiers)} tiers.",
             success=True,
             data={"benefits_comparison": comparison},
             suggestions=[
                 "Would you like details on a specific tier?",
-                "Should I recommend a tier for a member?",
-                "Want to see current member distribution by tier?",
             ],
         )
 
     def _get_value_highlight(self, tier_name: str) -> str:
         """Get value proposition highlight for a tier."""
         highlights = {
-            "basic": "Great way to get started",
-            "silver": "Most popular choice",
-            "gold": "Best value for active members",
-            "platinum": "Ultimate benefits package",
+            "basic": "Entry level",
+            "silver": "Adds member events and early registration",
+            "gold": "Adds free tickets and recognition",
+            "platinum": "Every benefit",
         }
         return highlights.get(tier_name, "")
 
@@ -560,81 +474,44 @@ class MemberServicesChip(BaseSkillChip):
         selected_template = templates.get(template, templates["general"])
 
         if is_bulk:
-            # Segment definitions
-            segments = {
-                "all_active": {"count": 245, "description": "All active members"},
-                "expiring_30": {"count": 28, "description": "Members expiring within 30 days"},
-                "expiring_60": {"count": 45, "description": "Members expiring within 60 days"},
-                "lapsed": {"count": 32, "description": "Lapsed members (expired < 90 days)"},
-                "gold_platinum": {"count": 52, "description": "Gold and Platinum members"},
-                "new_30": {"count": 18, "description": "New members (joined within 30 days)"},
-            }
-
-            segment_info = segments.get(segment, segments["all_active"])
-
+            # No membership_db span: the segment's size isn't known, and nothing is sent (consensus_no_step).
             communication_data = {
-                "communication_id": f"comm_{uuid4().hex[:8]}",
                 "type": "bulk",
                 "communication_type": communication_type,
                 "template": template,
                 "subject": selected_template["subject"],
                 "preview": selected_template["preview"],
                 "segment": segment,
-                "segment_description": segment_info["description"],
-                "recipient_count": segment_info["count"],
-                "status": "pending_approval",
-                "created_at": now.isoformat(),
-                "scheduled_send": (now + timedelta(hours=24)).isoformat(),
+                "recipient_count": None,
+                "sent": False,
             }
-
             requires_approval = self.requires_consensus("bulk_communication")
-
             return SkillResponse(
-                content=f"Prepared bulk {communication_type} to {segment_info['count']} members "
-                        f"({segment_info['description']}). Subject: '{selected_template['subject']}'. "
-                        f"Pending approval before sending.",
+                content=(f"Draft bulk {communication_type} to the '{segment}' segment. Subject: "
+                         f"'{selected_template['subject']}'. "
+                         f"{not_connected('A member database and an email service', 'I can\'t count the recipients or send it')}"),
                 success=True,
                 data={"communication": communication_data},
                 requires_consensus=requires_approval,
                 consensus_action="bulk_communication" if requires_approval else None,
-                suggestions=[
-                    "Would you like to preview the full message?",
-                    "Should I adjust the recipient segment?",
-                    "Want to schedule for a different time?",
-                ],
+                suggestions=[],
             )
 
-        # Individual communication
-        communication = MemberCommunication(
-            communication_id=f"comm_{uuid4().hex[:8]}",
-            member_id=member_id,
-            communication_type=communication_type,
-            subject=selected_template["subject"],
-            status="sent",
-            sent_at=now,
-        )
-
+        # Individual: drafted, not sent (no email_service span is wired yet).
         communication_data = {
-            "communication_id": communication.communication_id,
             "member_id": member_id,
             "type": "individual",
             "communication_type": communication_type,
             "template": template,
-            "subject": communication.subject,
-            "status": communication.status,
-            "sent_at": communication.sent_at.isoformat() if communication.sent_at else None,
+            "subject": selected_template["subject"],
+            "sent": False,
         }
-
         return SkillResponse(
-            content=f"Sent {communication_type} to member {member_id}. "
-                    f"Subject: '{communication.subject}'.",
+            content=(f"Draft {communication_type} to member {member_id}. Subject: '{selected_template['subject']}'. "
+                     f"{not_connected('An email service', 'it has not been sent')}"),
             success=True,
             data={"communication": communication_data},
-            suggestions=[
-                "Would you like to log a follow-up task?",
-                "Should I send to additional members?",
-                "Want to schedule a reminder?",
-            ],
+            suggestions=[],
         )
 
     async def _generate_membership_report(
@@ -649,113 +526,10 @@ class MemberServicesChip(BaseSkillChip):
         """
         report_type = request.entities.get("report_type", "summary")
         period = request.entities.get("period", "monthly")
-        include_trends = request.entities.get("include_trends", True)
-
-        now = datetime.now(timezone.utc)
-
-        report = {
-            "report_id": f"rpt_{uuid4().hex[:8]}",
-            "report_type": report_type,
-            "period": period,
-            "generated_at": now.isoformat(),
-            "summary": {
-                "total_members": 277,
-                "active_members": 245,
-                "new_members_period": 18,
-                "renewed_period": 42,
-                "lapsed_period": 8,
-                "net_growth": 10,
-                "retention_rate": "89.2%",
-            },
-            "by_tier": {
-                "basic": {"count": 98, "percentage": 40.0, "revenue": 4900.0},
-                "silver": {"count": 95, "percentage": 38.8, "revenue": 9500.0},
-                "gold": {"count": 38, "percentage": 15.5, "revenue": 9500.0},
-                "platinum": {"count": 14, "percentage": 5.7, "revenue": 7000.0},
-            },
-            "by_status": {
-                "active": 245,
-                "pending_renewal": 28,
-                "lapsed": 32,
-                "cancelled": 15,
-            },
-            "revenue": {
-                "period_total": 12500.0,
-                "ytd_total": 48750.0,
-                "average_member_value": 198.98,
-                "recurring_monthly": 2150.0,
-            },
-            "engagement_metrics": {
-                "event_participation_rate": "62%",
-                "newsletter_open_rate": "45%",
-                "volunteer_rate": "18%",
-                "average_events_per_member": 2.3,
-            },
-        }
-
-        if include_trends:
-            report["trends"] = {
-                "membership_growth": [
-                    {"month": "Sep", "total": 255, "net_change": 5},
-                    {"month": "Oct", "total": 262, "net_change": 7},
-                    {"month": "Nov", "total": 270, "net_change": 8},
-                    {"month": "Dec", "total": 277, "net_change": 7},
-                    {"month": "Jan", "total": 285, "net_change": 8},
-                    {"month": "Feb", "total": 293, "net_change": 8},
-                ],
-                "retention_by_tier": {
-                    "basic": "82%",
-                    "silver": "89%",
-                    "gold": "94%",
-                    "platinum": "98%",
-                },
-                "upgrade_trends": {
-                    "basic_to_silver": 12,
-                    "silver_to_gold": 8,
-                    "gold_to_platinum": 3,
-                },
-                "churn_reasons": [
-                    {"reason": "Financial/cost", "percentage": 35},
-                    {"reason": "Not using benefits", "percentage": 28},
-                    {"reason": "Moved away", "percentage": 18},
-                    {"reason": "Other/unknown", "percentage": 19},
-                ],
-            }
-
-        report["at_risk_members"] = {
-            "expiring_30_days": 28,
-            "expiring_60_days": 45,
-            "low_engagement": 15,
-            "recommended_outreach": 35,
-        }
-
-        report["recommendations"] = [
-            {
-                "recommendation": "Launch renewal campaign for 28 members expiring in 30 days",
-                "priority": "high",
-                "expected_impact": "Retain $5,600 in membership revenue",
-            },
-            {
-                "recommendation": "Re-engage 15 low-engagement members with personalized outreach",
-                "priority": "medium",
-                "expected_impact": "Improve retention by 5%",
-            },
-            {
-                "recommendation": "Promote Gold tier upgrade to Silver members with high engagement",
-                "priority": "medium",
-                "expected_impact": "12 potential upgrades worth $1,800",
-            },
-        ]
-
+        # No membership_db span is wired yet: no count, revenue, retention or trend is known, and none is made up.
         return SkillResponse(
-            content=f"Generated {period} membership report. Total: {report['summary']['total_members']} members "
-                    f"({report['summary']['active_members']} active). Retention rate: {report['summary']['retention_rate']}. "
-                    f"Period revenue: ${report['revenue']['period_total']:,.2f}.",
+            content=not_connected("A member database", f"I have no members to report on for the {period} {report_type}"),
             success=True,
-            data={"membership_report": report},
-            suggestions=[
-                "Would you like to drill into a specific segment?",
-                "Should I create an outreach list for at-risk members?",
-                "Want to compare with previous periods?",
-            ],
+            data={"membership_report": None, "connected": False},
+            suggestions=["Show membership tiers"],
         )

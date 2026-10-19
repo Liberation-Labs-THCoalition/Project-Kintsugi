@@ -30,7 +30,7 @@ Example:
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from kintsugi.skills import (
     BaseSkillChip,
@@ -42,7 +42,8 @@ from kintsugi.skills import (
     SkillResponse,
     register_chip,
 )
-from kintsugi.skills.base import consent_given, org_scoped
+from kintsugi.skills.base import consent_given, current_org, org_scoped
+from kintsugi.skills.honesty import not_connected
 
 
 class VolunteerStatus(str, Enum):
@@ -206,6 +207,23 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         "schedule_change_all": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }
     required_spans = ["twilio_sms", "calendar_api", "geocoding"]
+    # Honest without its spans (kintsugi/skills/honesty.py): the roster and the sender are the deployment's
+    # (VolunteerCoordinatorChip(roster=..., sender=...)). Without a roster no volunteer is listed; without a sender
+    # nothing is sent and it says so; a shift or logged hours aren't saved anywhere, and it says so. The mass limit
+    # counts only real sends.
+    simulated = False
+
+    def __init__(self, roster: Callable[[str], list["Volunteer"]] | None = None,
+                 sender: Callable[["Volunteer", str, str], Awaitable[bool]] | None = None) -> None:
+        super().__init__()
+        # roster(org_id) -> that org's volunteers; sender(volunteer, channel, message) -> True once delivered.
+        self.roster = roster
+        self.sender = sender
+
+    def while_held(self, action: str) -> str:
+        if action == "mass_notification" and self.sender is None:
+            return not_connected("A messaging service", "approving this will not send anything")
+        return ""
 
     SUPPORTED_INTENTS = {
         "volunteer_schedule": "_handle_schedule",
@@ -318,17 +336,18 @@ class VolunteerCoordinatorChip(BaseSkillChip):
 
         shift = result["shift"]
         content = (
-            f"Scheduled **{volunteer.name}** for {shift.role}\n"
+            f"Draft shift for **{volunteer.name}**: {shift.role}\n"
             f"Date: {shift.date.strftime('%A, %B %d, %Y')}\n"
             f"Time: {shift.start_time} - {shift.end_time}\n"
-            f"Location: {shift.location or 'TBD'}"
+            f"Location: {shift.location or 'TBD'}\n\n"
+            f"{not_connected('A shift calendar', 'this shift has not been saved anywhere and nobody has been told')}"
         )
 
         return SkillResponse(
             content=content,
             success=True,
-            data={"shift": shift.to_dict(), "volunteer": volunteer.to_dict()},
-            suggestions=["Send confirmation to volunteer?", "Add to shared calendar?"],
+            data={"shift": shift.to_dict(), "volunteer": volunteer.to_dict(), "saved": False},
+            suggestions=[],
         )
 
     async def _handle_search(
@@ -355,15 +374,13 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         )
 
         if not volunteers:
+            content = ("No available volunteers found matching your criteria." if self.roster else
+                       not_connected("A volunteer roster", "I can't list or search your volunteers"))
             return SkillResponse(
-                content="No available volunteers found matching your criteria.",
+                content=content,
                 success=True,
-                data={"volunteers": []},
-                suggestions=[
-                    "Try broadening your search criteria",
-                    "Check different dates or times",
-                    "Post the opportunity to recruit new volunteers",
-                ],
+                data={"volunteers": [], "connected": self.roster is not None},
+                suggestions=["Try broadening your search criteria"] if self.roster else [],
             )
 
         content_lines = [f"Found {len(volunteers)} available volunteers:\n"]
@@ -434,8 +451,15 @@ class VolunteerCoordinatorChip(BaseSkillChip):
             self._notified.setdefault(self._sender(context), []).append(
                 (datetime.now(timezone.utc).isoformat(), result["sent"]))
 
+        if self.roster is None:
+            content = not_connected("A volunteer roster", "I can't reach any volunteer, and nothing was sent")
+        elif self.sender is None:
+            content = (f"{not_connected('A messaging service', 'nothing was sent')} "
+                       f"Contact the {result['reachable']} volunteer(s) directly.")
+        else:
+            content = f"Delivered to {result['sent']} volunteer(s); {result['failed']} not delivered."
         return SkillResponse(
-            content=f"Sent {result['sent']} notifications ({result['failed']} failed).",
+            content=content,
             success=result["sent"] > 0,
             data=result,
         )
@@ -493,8 +517,12 @@ class VolunteerCoordinatorChip(BaseSkillChip):
                 notes=entities.get("notes", ""),
             )
 
+            if not result.get("success"):
+                return SkillResponse(content=f"Could not log hours: {result['reason']}", success=False, data=result)
             return SkillResponse(
-                content=f"Logged {entities['hours']} hours for volunteer. New total: {result['new_total']:.1f} hours.",
+                content=(f"{entities['hours']} hours for {volunteer_id}: "
+                         f"{not_connected('A volunteer database', 'they have not been recorded anywhere')} "
+                         "Record them in your volunteer records."),
                 success=True,
                 data=result,
             )
@@ -511,7 +539,7 @@ class VolunteerCoordinatorChip(BaseSkillChip):
                 content=report["summary"],
                 success=True,
                 data=report,
-                suggestions=["Export to CSV?", "Send summary to volunteers?"],
+                suggestions=[],
             )
 
     async def _handle_match(
@@ -537,12 +565,9 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         )
 
         if not matches:
-            content = "No volunteers found with matching skills."
-            suggestions = [
-                "Expand search to related skills?",
-                "Post training opportunity?",
-                "Search for volunteers who can be trained?",
-            ]
+            content = ("No volunteers found with matching skills." if self.roster else
+                       not_connected("A volunteer roster", "I can't match anyone's skills"))
+            suggestions = []
         else:
             content_lines = [f"Found {len(matches)} volunteers matching '{need_type}':\n"]
             for m in matches[:5]:
@@ -552,7 +577,7 @@ class VolunteerCoordinatorChip(BaseSkillChip):
                     f"  Skills: {', '.join(m['matching_skills'])}"
                 )
             content = "\n".join(content_lines)
-            suggestions = ["Schedule top match?", "Contact all matches?"]
+            suggestions = ["Draft a shift for the top match"]
 
         return SkillResponse(
             content=content,
@@ -585,7 +610,6 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         Returns:
             List of available volunteers sorted by relevance
         """
-        # In production, would query volunteer database
         all_volunteers = await self._get_all_volunteers(org_id)
 
         available = []
@@ -670,8 +694,8 @@ class VolunteerCoordinatorChip(BaseSkillChip):
                 status=ShiftStatus.SCHEDULED,
             )
 
-        # In production, would save to database
-        return {"success": True, "shift": shift}
+        # Not saved: no calendar_api span is wired yet. The response says so.
+        return {"success": True, "shift": shift, "saved": False}
 
     async def send_reminder(
         self,
@@ -693,6 +717,7 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         """
         sent = 0
         failed = 0
+        reachable = 0
         results = []
 
         for vol_id in volunteer_ids:
@@ -702,32 +727,31 @@ class VolunteerCoordinatorChip(BaseSkillChip):
                 results.append({"volunteer_id": vol_id, "status": "not_found"})
                 continue
 
-            # Send via requested channels
-            channel_results = {}
-
-            if channel in ("sms", "both") and volunteer.phone:
-                # In production, would use Twilio
-                channel_results["sms"] = "sent"
-
-            if channel in ("email", "both") and volunteer.email:
-                # In production, would use email service
-                channel_results["email"] = "sent"
-
-            if channel_results:
-                sent += 1
-                results.append({
-                    "volunteer_id": vol_id,
-                    "name": volunteer.name,
-                    "status": "sent",
-                    "channels": channel_results,
-                })
-            else:
+            channels = [c for c, ok in (("sms", channel in ("sms", "both") and volunteer.phone),
+                                        ("email", channel in ("email", "both") and volunteer.email)) if ok]
+            if not channels:
                 failed += 1
                 results.append({"volunteer_id": vol_id, "status": "no_contact_info"})
+                continue
+            reachable += 1
+            if self.sender is None:
+                # Nothing is connected to send through: nothing is sent, and nothing is counted as sent.
+                results.append({"volunteer_id": vol_id, "status": "not_sent", "channels": channels})
+                continue
+            delivered = {c: bool(await self.sender(volunteer, c, message)) for c in channels}
+            if any(delivered.values()):
+                sent += 1
+                results.append({"volunteer_id": vol_id, "name": volunteer.name, "status": "sent",
+                                "channels": {c: ("sent" if ok else "failed") for c, ok in delivered.items()}})
+            else:
+                failed += 1
+                results.append({"volunteer_id": vol_id, "status": "failed"})
 
         return {
             "sent": sent,
             "failed": failed,
+            "reachable": reachable,
+            "connected": self.sender is not None,
             "total": len(volunteer_ids),
             "results": results,
         }
@@ -756,17 +780,13 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         if not volunteer:
             return {"success": False, "reason": "Volunteer not found"}
 
-        # Update volunteer hours (in production, would save to database)
-        old_total = volunteer.total_hours
-        volunteer.total_hours += hours
-
+        # Not recorded: no volunteer database is wired to write to. The roster's total is left as it is.
         return {
             "success": True,
+            "recorded": False,
             "volunteer_id": volunteer_id,
-            "hours_logged": hours,
+            "hours": hours,
             "date": date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "previous_total": old_total,
-            "new_total": volunteer.total_hours,
             "shift_id": shift_id,
         }
 
@@ -811,49 +831,19 @@ class VolunteerCoordinatorChip(BaseSkillChip):
 
     # Private helper methods
 
-    async def _get_volunteer(self, volunteer_id: str) -> Volunteer | None:
-        """Fetch a volunteer by ID."""
-        # Simulated data
-        volunteers = await self._get_all_volunteers("")
-        for v in volunteers:
+    async def _get_volunteer(self, volunteer_id: str, org_id: str = "") -> Volunteer | None:
+        """Fetch a volunteer by ID from the deployment's roster."""
+        for v in await self._get_all_volunteers(org_id):
             if v.id == volunteer_id:
                 return v
         return None
 
     async def _get_all_volunteers(self, org_id: str) -> list[Volunteer]:
-        """Fetch all volunteers for an organization."""
-        # Simulated data - in production would query database
-        return [
-            Volunteer(
-                id="vol_001",
-                name="Alice Johnson",
-                email="alice@example.com",
-                phone="+15551234567",
-                skills=["food_safety", "event_planning", "spanish"],
-                availability={"monday": ["morning", "afternoon"], "wednesday": ["afternoon"]},
-                total_hours=150.0,
-                preferred_roles=["food_prep", "event_support"],
-            ),
-            Volunteer(
-                id="vol_002",
-                name="Bob Smith",
-                email="bob@example.com",
-                phone="+15559876543",
-                skills=["driving", "logistics", "first_aid"],
-                availability={"tuesday": ["morning"], "thursday": ["morning", "afternoon"]},
-                total_hours=75.0,
-                preferred_roles=["delivery", "setup"],
-            ),
-            Volunteer(
-                id="vol_003",
-                name="Carol Williams",
-                email="carol@example.com",
-                skills=["teaching", "tutoring", "mentoring"],
-                availability={"monday": ["afternoon"], "friday": ["morning", "afternoon"]},
-                total_hours=200.0,
-                preferred_roles=["tutor", "mentor"],
-            ),
-        ]
+        """The deployment's volunteers for this org, or none when no roster is connected (no one is invented)."""
+        if self.roster is None:
+            return []
+        # Every request runs in its own org's scope (the base wrapper), so a caller that passes no org gets that one.
+        return list(self.roster(org_id or current_org() or ""))
 
     async def _get_shift(self, shift_id: str) -> Shift | None:
         """Fetch a shift by ID."""
@@ -866,13 +856,14 @@ class VolunteerCoordinatorChip(BaseSkillChip):
         org_id: str,
         date_range: str,
     ) -> dict[str, Any]:
-        """Generate volunteer hours report."""
-        # Simulated report data
+        """Volunteer hours from the deployment's roster, labelled as lifetime totals (no dated records exist)."""
+        if self.roster is None:
+            return {"summary": not_connected("A volunteer roster", "I have no hours to report"),
+                    "connected": False, "date_range": date_range}
         if volunteer_id:
             volunteer = await self._get_volunteer(volunteer_id)
             summary = f"Volunteer Hours Report: {volunteer.name if volunteer else 'Unknown'}\n"
-            summary += f"Period: {date_range}\n"
-            summary += f"Total Hours: {volunteer.total_hours if volunteer else 0:.1f}"
+            summary += f"Lifetime total on the roster: {volunteer.total_hours if volunteer else 0:.1f} hours (not by period)"
             return {
                 "summary": summary,
                 "volunteer_id": volunteer_id,
@@ -883,11 +874,10 @@ class VolunteerCoordinatorChip(BaseSkillChip):
             # Org-wide report
             volunteers = await self._get_all_volunteers(org_id)
             total_hours = sum(v.total_hours for v in volunteers)
-            summary = f"Organization Volunteer Hours Report\n"
-            summary += f"Period: {date_range}\n"
-            summary += f"Total Volunteers: {len(volunteers)}\n"
+            summary = f"Organization Volunteer Hours (lifetime totals on the roster, not by period)\n"
+            summary += f"Volunteers: {len(volunteers)}\n"
             summary += f"Total Hours: {total_hours:.1f}\n"
-            summary += f"Average Hours/Volunteer: {total_hours / len(volunteers):.1f}"
+            summary += f"Average Hours/Volunteer: {total_hours / len(volunteers):.1f}" if volunteers else ""
             return {
                 "summary": summary,
                 "total_volunteers": len(volunteers),

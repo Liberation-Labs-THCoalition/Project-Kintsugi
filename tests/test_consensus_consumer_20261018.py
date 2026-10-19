@@ -304,14 +304,16 @@ async def test_a_raid_alert_notifies_nobody_until_approved():
 
 
 @pytest.mark.asyncio
-async def test_onboarding_is_completed_only_once_approved():
+async def test_onboarding_completion_is_held_and_never_reported_done_without_an_hr_system():
     from kintsugi.skills.programs_people.staff_onboarding import StaffOnboardingChip
     chip = StaffOnboardingChip()
     held = await chip.handle(SkillRequest(intent="onboard_complete", raw_input="done", entities={
         "employee_id": "e-1", "force_complete": True}), ctx())
     assert "ompleted" not in held.content and held.metadata.get("held")
     result = await _approve_and_run(chip, held)
-    assert result["success"] and "ompleted" in result["content"] and "nothing ran" not in result["content"]
+    # approval can't make a record exist: no HR system is connected (10-19)
+    assert not result["success"] and "no step that carries out" in result["content"], result
+    assert "ompleted" not in result["content"] and "acknowledged" not in result["content"]
 
 
 # ---- the edges of the hold and the token ---------------------------------------------------------------------------

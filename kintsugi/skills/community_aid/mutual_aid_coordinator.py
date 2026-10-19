@@ -689,7 +689,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             if need.status == AidStatus.FULFILLED:
                 category_stats[cat]["fulfilled"] += 1
 
-        fulfillment_rate = (fulfilled / total_matches * 100) if total_matches > 0 else 0
+        # No matches yet is "no rate", not 0.0% (a default number read as a fact, 10-19).
+        fulfillment_rate = (fulfilled / total_matches * 100) if total_matches > 0 else None
 
         summary = (
             f"Mutual Aid Report ({period}):\n"
@@ -698,7 +699,8 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             f"- Matches made: {total_matches}\n"
             f"- Successfully fulfilled: {fulfilled}\n"
             f"- In progress: {in_progress}\n"
-            f"- Fulfillment rate: {fulfillment_rate:.1f}%"
+            + (f"- Fulfillment rate: {fulfillment_rate:.1f}%" if fulfillment_rate is not None
+               else "- Fulfillment rate: none yet (no matches)")
         )
 
         return {
