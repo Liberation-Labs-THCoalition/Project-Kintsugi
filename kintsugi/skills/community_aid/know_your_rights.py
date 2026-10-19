@@ -30,6 +30,7 @@ Example:
     )
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -166,6 +167,34 @@ class KnowYourRightsChip(BaseSkillChip):
     WITH_RIGHTS = {"police_encounter": POLICE_RIGHTS, "protest_rights": POLICE_RIGHTS,
                    "immigration_rights": IMMIGRATION_RIGHTS}
 
+    # What a person types, mapped to the three topics with US-wide rights (Vera, 10-19: the agent path sets no
+    # entities, so "ICE is at my door, what are my rights" got the fallback). Immigration first: ICE in capitals, or
+    # lowercase ice near a raid word, so "I slipped on ice" isn't read as a raid.
+    TOPIC_WORDS = [
+        ("immigration_rights", re.compile(r"\bICE\b")),
+        ("immigration_rights", re.compile(r"(?i)\b(immigration|immigrants?|deport\w*|la migra|undocumented|asylum|visas?|"
+                                          r"green card)\b")),
+        ("immigration_rights", re.compile(r"(?i)\bice\b.{0,40}\b(door|raids?|agents?|officers?|detain\w*|outside|"
+                                          r"here|coming)\b")),
+        ("immigration_rights", re.compile(r"(?i)\bwarrant\b.{0,40}\bdoor\b|\bdoor\b.{0,40}\bwarrant\b")),
+        ("protest_rights", re.compile(r"(?i)\b(protests?|protesting|march(es|ing)|rall(y|ies)|demonstrat\w*|picket\w*)\b")),
+        ("protest_rights", re.compile(r"\bmarch\b")),        # lowercase only: "in March" is the month
+        ("police_encounter", re.compile(r"(?i)\b(police|cops?|officers?|arrest\w*|pulled over|traffic stop|stopped me)\b")),
+    ]
+    TOPIC_CHOICES = ("I can give the rights that hold across the US for three situations: a police encounter, an "
+                     "immigration encounter (ICE at your door included), or a protest. Which is it?")
+
+    def _topic(self, request: SkillRequest, default: str | None = None) -> str | None:
+        """The topic the person named, or the one their words point to, or default."""
+        named = request.entities.get("topic")
+        if named:
+            return named
+        raw = getattr(request, "raw_input", "") or ""
+        for topic, pattern in self.TOPIC_WORDS:
+            if pattern.search(raw):
+                return topic
+        return default
+
     def __init__(self, contacts: dict[str, str] | None = None) -> None:
         super().__init__()
         # The deployment's own lines: legal_hotline, legal_clinic, immigration_legal_help.
@@ -226,7 +255,7 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             SkillResponse with rights information and disclaimer
         """
-        topic = request.entities.get("topic", "general")
+        topic = self._topic(request)
         state = request.entities.get("state", "federal")
         language = request.entities.get("language", "en")
 
@@ -234,20 +263,26 @@ class KnowYourRightsChip(BaseSkillChip):
         if language not in self.SUPPORTED_LANGUAGES:
             language = "en"
 
+        if topic is None:
+            # Nothing named and nothing recognised: offer the three, never a dead end.
+            return SkillResponse(
+                content=f"{self.TOPIC_CHOICES}\n\n{self.LEGAL_DISCLAIMER}",
+                success=True,
+                data={"topic": None, "rights_info": None, "choices": list(self.WITH_RIGHTS)},
+                suggestions=["My rights in a police encounter", "My rights if ICE comes", "My rights at a protest"],
+            )
+
         rights_info = await self.lookup_rights(topic, state, language)
 
         if not rights_info:
             label = topic.replace("_", " ")
             return SkillResponse(
-                content=(f"{not_connected('A rights database', f'I can\'t tell you your {label} in {state}')} "
+                content=(f"{not_connected('A rights database', f'I can\'t look up {label} here')} "
                          "A legal aid organization can, and it's free if you qualify. "
-                         f"{US_REFERRALS}\n\n{self.LEGAL_DISCLAIMER}"),
+                         f"{US_REFERRALS}\n\n{self.TOPIC_CHOICES}\n\n{self.LEGAL_DISCLAIMER}"),
                 success=True,
                 data={"topic": topic, "jurisdiction": state, "rights_info": None, "connected": False},
-                suggestions=[
-                    "Get a know-your-rights card for police encounters",
-                    "Get a know-your-rights card for immigration encounters",
-                ],
+                suggestions=["My rights in a police encounter", "My rights if ICE comes", "My rights at a protest"],
             )
 
         content = self._english_note(language) + self._format_rights_info(rights_info)
@@ -541,7 +576,7 @@ class KnowYourRightsChip(BaseSkillChip):
         Returns:
             SkillResponse with rights card content
         """
-        topic = request.entities.get("topic", "police_encounter")
+        topic = self._topic(request, default="police_encounter")
         language = request.entities.get("language", "en")
         format_type = request.entities.get("format", "text")
 

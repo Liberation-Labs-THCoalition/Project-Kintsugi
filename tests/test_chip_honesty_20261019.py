@@ -645,3 +645,46 @@ async def test_a_small_exchange_records_nothing_and_says_so():
 async def test_formation_guidance_names_costs_without_inventing_amounts():
     r = await _se("coop_start", coop_type="worker", members=4)
     assert "vary a lot by state" in r.content and "$" not in r.content
+
+
+# ---- know your rights hears what people type (Vera, 10-19) -------------------------------------------------------------
+
+async def _kyr_says(raw, intent="rights_lookup", **entities):
+    from kintsugi.skills.community_aid.know_your_rights import KnowYourRightsChip
+    return await KnowYourRightsChip().handle(SkillRequest(intent=intent, raw_input=raw, entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw, topic, says", [
+    ("ICE is at my door, what are my rights", "immigration_rights", "signed by a judge"),
+    ("there's an immigration raid on our block", "immigration_rights", "signed by a judge"),
+    ("ice agents outside the building", "immigration_rights", "signed by a judge"),
+    ("the police pulled me over, what are my rights", "police_encounter", "remain silent"),
+    ("can I be arrested for filming cops", "police_encounter", "remain silent"),
+    ("what are my rights at the protest tomorrow", "protest_rights", "remain silent"),
+])
+async def test_what_a_person_types_reaches_its_rights(raw, topic, says):
+    r = await _kyr_says(raw)
+    assert r.data["topic"] == topic and says in r.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["what are my rights", "I slipped on ice at work", "my lease ends in March"])
+async def test_nothing_recognised_offers_the_three_never_a_dead_end(raw):
+    r = await _kyr_says(raw)
+    assert r.success and r.data["topic"] is None and r.data["choices"] == list(
+        __import__("kintsugi.skills.community_aid.know_your_rights", fromlist=["x"]).KnowYourRightsChip.WITH_RIGHTS)
+    assert "police encounter" in r.content and "immigration encounter" in r.content and "protest" in r.content
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_reads_cleanly_with_no_state():
+    r = await _kyr_says("x", topic="tenant_rights")
+    assert "I can't look up tenant rights here" in r.content
+    assert "federal" not in r.content and "your general" not in r.content and "Which is it?" in r.content
+
+
+@pytest.mark.asyncio
+async def test_a_card_follows_what_the_person_typed():
+    r = await _kyr_says("make me a card for when ICE comes", intent="rights_card")
+    assert r.data["rights_card"]["topic"] == "immigration_rights" and "signed by a judge" in r.content
