@@ -63,8 +63,6 @@ PENDING_REPAIR: dict[str, str] = {
     "food_access.py": "invented pantries, meal programs and a past pickup date with 555 numbers",
     "solidarity_economy.py": "invented coops, CDFI terms and a time-bank balance",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
-    "crisis_response.py": "claims responders, leadership and emergency services notified",
-    "housing_navigator.py": "invented listings, landlord record, waitlist position, eviction hotline",
     "volunteer_coordinator.py": "'Sent N notifications' when nothing is sent; invented roster",
     "donor_stewardship.py": "every letter to 'Sarah'; invented receipts, profiles and totals",
     "member_services.py": "renewals 'processed', receipts and emails 'sent'; invented members and figures",
@@ -239,6 +237,8 @@ CHIPS = _shipped_chips()
 REAL_CHIPS = {
     "BashSkillChip": "runs the command it's given, in a sandbox, and reports what happened",
     "RapidResponseChip": "says nobody was alerted and nothing sent; gives only configured lines, else 211 (10-19)",
+    "CrisisResponseChip": "keeps real incident records; says nothing was broadcast or dispatched (10-19)",
+    "HousingNavigatorChip": "lists nothing it can't look up; tenant law as questions to ask locally (10-19)",
 }
 
 
@@ -396,3 +396,83 @@ async def test_no_safe_place_is_made_up():
     mine = await RapidResponseChip(contacts={"safe_location_line": "LINE-S"}).handle(
         SkillRequest(intent="safe_location", raw_input="s"), _ctx())
     assert "LINE-S" in mine.content
+
+
+# ---- crisis response: the repairs --------------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_crisis_alert_is_recorded_and_says_nobody_was_notified():
+    from kintsugi.skills.community_aid.crisis_response import CrisisResponseChip
+    chip = CrisisResponseChip()
+    r = await chip.handle(SkillRequest(intent="crisis_alert", raw_input="x", entities={
+        "crisis_type": "natural_disaster", "severity": "high", "title": "Flooding", "location": "Riverside"}), _ctx())
+    from kintsugi.skills.base import org_scope
+    with org_scope("org_h"):
+        assert r.data["incident_id"] in chip._incidents                    # the record is real
+    assert "nobody has been notified" in r.content and "911" in r.content and _claims_in(r.content) == []
+    low = await chip.handle(SkillRequest(intent="crisis_alert", raw_input="x", entities={"severity": "low"}), _ctx())
+    assert "911" not in low.content and _claims_in(low.content) == []
+
+
+@pytest.mark.asyncio
+async def test_a_held_critical_alert_says_approval_notifies_nobody_and_what_to_do_now():
+    from kintsugi.skills.community_aid.crisis_response import CrisisResponseChip
+    chip = CrisisResponseChip()
+    held = await chip.handle(SkillRequest(intent="crisis_alert", raw_input="x", entities={"severity": "critical"}), _ctx())
+    assert held.metadata.get("held") and "approving this will not notify anyone" in held.content and "911" in held.content
+    result = await _approve_and_run(chip, held)
+    assert "nobody has been notified" in result["content"] and _claims_in(result["content"]) == []
+
+
+@pytest.mark.asyncio
+async def test_mobilizing_with_no_volunteers_on_record_says_so_and_dispatches_nobody():
+    from kintsugi.skills.community_aid.crisis_response import CrisisResponseChip
+    chip = CrisisResponseChip()
+    r = await chip.handle(SkillRequest(intent="crisis_alert", raw_input="x", entities={"severity": "medium"}), _ctx())
+    m = await chip.handle(SkillRequest(intent="mobilize_response", raw_input="m",
+                                       entities={"incident_id": r.data["incident_id"]}), _ctx())
+    assert m.data["volunteers_mobilized"] == 0 and "none was marked deployed" in m.content
+    assert _claims_in(m.content) == []
+
+
+@pytest.mark.asyncio
+async def test_the_alert_log_records_that_nothing_was_sent():
+    from kintsugi.skills.base import org_scope
+    from kintsugi.skills.community_aid.crisis_response import CrisisResponseChip
+    chip = CrisisResponseChip()
+    await chip.handle(SkillRequest(intent="crisis_alert", raw_input="x", entities={"severity": "medium"}), _ctx())
+    with org_scope("org_h"):
+        entry = chip._alert_log[-1]
+    assert entry["sent"] is False and "sent_at" not in entry
+
+
+# ---- housing navigator: the repairs ------------------------------------------------------------------------------------
+
+async def _housing(intent, contacts=None, **entities):
+    from kintsugi.skills.community_aid.housing_navigator import HousingNavigatorChip
+    return await HousingNavigatorChip(contacts=contacts).handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_no_listing_application_or_landlord_is_made_up():
+    s = await _housing("housing_search", city="Oakland", bedrooms=2)
+    assert s.data["units"] == [] and "isn't connected" in s.content and "Oak Street" not in s.content
+    v = await _housing("voucher_status", application_id="APP-1")
+    assert v.data["connected"] is False and "Waitlist Position" not in v.content and "#234" not in v.content
+    landlord = await _housing("landlord_lookup", property_address="456 Oak St")
+    assert landlord.data["landlord_id"] is None and "Bay Area Properties" not in landlord.content
+
+
+@pytest.mark.asyncio
+async def test_tenant_rights_are_questions_never_a_rule_for_everywhere():
+    r = await _housing("tenant_rights", state="TX")
+    assert "Rent increases limited to annual cap" not in r.content and "24-48 hour" not in r.content
+    assert "questions to ask locally" in r.content and "Many don't" in r.content
+
+
+@pytest.mark.asyncio
+async def test_eviction_help_names_only_configured_lines():
+    none = await _housing("eviction_defense", stage="notice")
+    assert "isn't connected" in none.content and "211" in none.content and not PHONE.search(none.content)
+    mine = await _housing("eviction_defense", contacts={"eviction_legal_help": "LINE-E"}, stage="court")
+    assert "LINE-E" in mine.content and "DO NOT miss your court date" in mine.content
