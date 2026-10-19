@@ -59,7 +59,6 @@ def _walk_strings(path: Path):
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "food_access.py": "invented pantries, meal programs and a past pickup date with 555 numbers",
     "solidarity_economy.py": "invented coops, CDFI terms and a time-bank balance",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
     "volunteer_coordinator.py": "'Sent N notifications' when nothing is sent; invented roster",
@@ -241,6 +240,7 @@ REAL_CHIPS = {
     "CrisisResponseChip": "keeps real incident records; says nothing was broadcast or dispatched (10-19)",
     "HousingNavigatorChip": "lists nothing it can't look up; tenant law as questions to ask locally (10-19)",
     "KnowYourRightsChip": "US-wide rights for police and immigration only; English said plainly; no invented org (10-19)",
+    "FoodAccessChip": "lists no invented pantry or meal; no SNAP verdict from stale limits; donations not recorded, said so (10-19)",
 }
 
 
@@ -521,3 +521,37 @@ async def test_clinics_and_legal_help_are_the_deployments_own_or_none():
     assert "isn't connected" in help_.content and not PHONE.search(help_.content) and not URL.search(help_.content)
     mine = await _kyr("legal_resource", contacts={"immigration_legal_help": "LINE-I"})
     assert "LINE-I" in mine.content
+
+
+# ---- food access: the repairs ------------------------------------------------------------------------------------------
+
+async def _food(intent, contacts=None, **entities):
+    from kintsugi.skills.community_aid.food_access import FoodAccessChip
+    return await FoodAccessChip(contacts=contacts).handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_no_pantry_or_meal_program_is_made_up():
+    p = await _food("pantry_find", zip_code="94612")
+    assert p.data["pantries"] == [] and "555" not in p.content and "211" in p.content
+    m = await _food("meal_schedule", meal_type="lunch")
+    assert m.data["programs"] == [] and "Oak St" not in m.content
+    mine = await _food("pantry_find", contacts={"food_pantry_line": "LINE-F"})
+    assert "LINE-F" in mine.content
+
+
+@pytest.mark.asyncio
+async def test_snap_gives_no_verdict_or_benefit_estimate():
+    r = await _food("snap_help", household_size=3, monthly_income=2000)
+    assert r.data["eligibility"] is None and "Likely Eligible" not in r.content and "May Not Qualify" not in r.content
+    assert "Estimated Monthly Benefit" not in r.content and "Apply even if you're unsure" in r.content
+    assert "don't have to give one or their immigration status" in r.content
+
+
+@pytest.mark.asyncio
+async def test_a_donation_is_not_recorded_and_says_so():
+    r = await _food("food_donate", quantity=20, pickup=True)
+    assert r.data["recorded"] is False and r.data["pickup_scheduled"] is False
+    assert "No pickup has been scheduled" in r.content and "Donation ID" not in r.content
+    held = await _food("food_donate", quantity=500)
+    assert held.metadata.get("held") and "approving this records nothing" in held.content

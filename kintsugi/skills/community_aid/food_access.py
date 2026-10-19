@@ -31,6 +31,7 @@ from datetime import datetime, time, timezone
 from enum import Enum
 from typing import Any
 
+from kintsugi.skills.honesty import US_REFERRALS, not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -157,18 +158,24 @@ class FoodAccessChip(BaseSkillChip):
         "partner_food_share": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }
     required_spans = ["pantry_network", "snap_eligibility", "meal_scheduler", "inventory_system"]
+    # Honest without its spans (kintsugi/skills/honesty.py): no pantry, meal program, pickup or drop-off is invented,
+    # and no SNAP verdict is given from stale limits. (The FY2024 table and a made-up benefit formula were removed
+    # 10-19: limits change every October and differ by state, and a stale "may not qualify" can stop someone applying.)
+    simulated = False
 
-    # SNAP income limits by household size (monthly, 2024 federal guidelines)
-    SNAP_INCOME_LIMITS: dict[int, int] = {
-        1: 1580,
-        2: 2137,
-        3: 2694,
-        4: 3250,
-        5: 3807,
-        6: 4364,
-        7: 4921,
-        8: 5478,
-    }
+    def __init__(self, contacts: dict[str, str] | None = None) -> None:
+        super().__init__()
+        # The deployment's own lines: food_pantry_line, meal_program_line, donation_line, snap_help_line.
+        self.contacts = dict(contacts or {})
+
+    def _line(self, key: str, label: str) -> str:
+        return f"{label}: **{self.contacts[key]}**\n" if self.contacts.get(key) else ""
+
+    def while_held(self, action: str) -> str:
+        if action == "approve_food_distribution":
+            return (f"{not_connected('An inventory system', 'approving this records nothing and schedules no pickup')} "
+                    "Contact your food bank directly to arrange a large donation.")
+        return ""
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -223,17 +230,13 @@ class FoodAccessChip(BaseSkillChip):
 
         if not pantries:
             return SkillResponse(
-                content="No food pantries found matching your criteria. "
-                "Try expanding your search distance or checking back later.\n\n"
-                "**Alternative Resources:**\n"
-                "- National Hunger Hotline: 1-866-3-HUNGRY\n"
-                "- SNAP Information: 1-800-221-5689",
+                content=(f"{not_connected('A food pantry directory', 'I can\'t list pantries near you')} "
+                         "Call 211 and ask which pantries are open near you today, and what to bring.\n"
+                         + self._line("food_pantry_line", "Your organization's food line")),
                 success=True,
-                data={"pantries": []},
+                data={"pantries": [], "connected": False},
                 suggestions=[
-                    "Expand search distance",
-                    "Check SNAP eligibility",
-                    "Find community meal programs",
+                    "Get help applying for SNAP",
                 ],
             )
 
@@ -268,9 +271,7 @@ class FoodAccessChip(BaseSkillChip):
                 "total_found": len(pantries),
             },
             suggestions=[
-                "Get directions to a pantry",
-                "Check pantry inventory",
-                "Schedule a pickup time",
+                "Get help applying for SNAP",
             ],
         )
 
@@ -292,59 +293,8 @@ class FoodAccessChip(BaseSkillChip):
         Returns:
             List of matching food pantries
         """
-        # In production, this would query the pantry_network span
-        sample_pantries = [
-            FoodPantry(
-                pantry_id="pantry_001",
-                name="Community Food Bank",
-                address="123 Main Street",
-                city="Oakland",
-                zip_code="94612",
-                phone="(510) 555-1234",
-                status=PantryStatus.OPEN,
-                hours={
-                    "Monday": "9am-5pm",
-                    "Tuesday": "9am-5pm",
-                    "Wednesday": "9am-7pm",
-                    "Thursday": "9am-5pm",
-                    "Friday": "9am-3pm",
-                    "Saturday": "10am-2pm",
-                },
-                dietary_options=[
-                    DietaryRestriction.VEGETARIAN,
-                    DietaryRestriction.HALAL,
-                    DietaryRestriction.DIABETIC_FRIENDLY,
-                ],
-                inventory_level="high",
-                next_restock=datetime(2024, 2, 15, 8, 0, tzinfo=timezone.utc),
-                requirements=["Photo ID", "Proof of address"],
-                languages=["English", "Spanish", "Vietnamese"],
-                distance_miles=1.2,
-            ),
-            FoodPantry(
-                pantry_id="pantry_002",
-                name="Faith Community Pantry",
-                address="456 Church Lane",
-                city="Oakland",
-                zip_code="94610",
-                phone="(510) 555-5678",
-                status=PantryStatus.OPEN,
-                hours={
-                    "Tuesday": "10am-2pm",
-                    "Thursday": "10am-2pm",
-                    "Saturday": "9am-12pm",
-                },
-                dietary_options=[
-                    DietaryRestriction.VEGETARIAN,
-                    DietaryRestriction.KOSHER,
-                ],
-                inventory_level="medium",
-                next_restock=None,
-                requirements=["Self-declaration of need"],
-                languages=["English", "Spanish"],
-                distance_miles=2.5,
-            ),
-        ]
+        # No pantry_network span is wired yet: there are no pantries to list, and none is made up.
+        sample_pantries: list[FoodPantry] = []
 
         # Filter by distance
         results = [p for p in sample_pantries if (p.distance_miles or 0) <= max_distance]
@@ -375,13 +325,13 @@ class FoodAccessChip(BaseSkillChip):
         household_size = request.entities.get("household_size")
         monthly_income = request.entities.get("monthly_income")
 
+        content = ""
         if action == "eligibility" and household_size and monthly_income:
-            eligible, details = await self.check_snap_eligibility(
-                household_size, monthly_income
-            )
-            content = self._format_eligibility_result(eligible, details, household_size, monthly_income)
-        else:
-            content = self._get_snap_overview()
+            content = (f"{not_connected('A SNAP eligibility service', 'I can\'t check your numbers against this year\'s limits')} "
+                       "Limits change every October and differ by state, and many states use higher ones. Your "
+                       "state's SNAP website can screen you in minutes. Apply even if you're unsure: only the state "
+                       "decides.\n\n")
+        content += self._get_snap_overview() + self._line("snap_help_line", "\nHelp applying")
 
         return SkillResponse(
             content=content,
@@ -390,83 +340,19 @@ class FoodAccessChip(BaseSkillChip):
                 "action": action,
                 "household_size": household_size,
                 "income": monthly_income,
+                "eligibility": None,
+                "connected": False,
             },
             suggestions=[
-                "Start SNAP application",
-                "Find SNAP application assistance",
-                "Check other benefit programs",
+                "Find food pantries",
             ],
         )
-
-    async def check_snap_eligibility(
-        self, household_size: int, monthly_income: float
-    ) -> tuple[bool, dict[str, Any]]:
-        """Check SNAP eligibility based on household size and income.
-
-        Args:
-            household_size: Number of people in household
-            monthly_income: Gross monthly income
-
-        Returns:
-            Tuple of (is_eligible, eligibility_details)
-        """
-        # Get income limit (handle large households)
-        if household_size <= 8:
-            income_limit = self.SNAP_INCOME_LIMITS[household_size]
-        else:
-            # Add $557 per additional person beyond 8
-            income_limit = self.SNAP_INCOME_LIMITS[8] + (557 * (household_size - 8))
-
-        is_eligible = monthly_income <= income_limit
-
-        # Estimate monthly benefit (simplified calculation)
-        max_benefit = 234 * household_size  # Approximate max benefit
-        estimated_benefit = max(0, max_benefit - (monthly_income * 0.3)) if is_eligible else 0
-
-        return is_eligible, {
-            "income_limit": income_limit,
-            "estimated_monthly_benefit": round(estimated_benefit),
-            "household_size": household_size,
-            "gross_income": monthly_income,
-        }
-
-    def _format_eligibility_result(
-        self, eligible: bool, details: dict, household_size: int, income: float
-    ) -> str:
-        """Format SNAP eligibility check results."""
-        content = "**SNAP Eligibility Check**\n\n"
-        content += f"Household Size: {household_size}\n"
-        content += f"Monthly Income: ${income:,.0f}\n"
-        content += f"Income Limit: ${details['income_limit']:,}\n\n"
-
-        if eligible:
-            content += "**Result: Likely Eligible**\n\n"
-            content += f"Estimated Monthly Benefit: ${details['estimated_monthly_benefit']}\n\n"
-            content += (
-                "*This is a preliminary estimate. Actual eligibility and benefit "
-                "amounts are determined by your state SNAP office based on detailed "
-                "income and expense information.*"
-            )
-        else:
-            content += "**Result: May Not Qualify Based on Income**\n\n"
-            content += (
-                "However, you may still qualify due to:\n"
-                "- Certain deductions (shelter costs, dependent care)\n"
-                "- Elderly or disabled household members\n"
-                "- Special state programs\n\n"
-                "We recommend applying anyway or contacting your local SNAP office."
-            )
-
-        return content
 
     def _get_snap_overview(self) -> str:
         """Get general SNAP program information."""
         return (
             "**SNAP (Supplemental Nutrition Assistance Program)**\n\n"
             "SNAP helps low-income individuals and families buy nutritious food.\n\n"
-            "**To Check Eligibility, I Need:**\n"
-            "- Household size (people who live and eat together)\n"
-            "- Monthly gross income (before taxes)\n\n"
             "**How to Apply:**\n"
             "1. Apply online at your state's SNAP website\n"
             "2. Visit your local SNAP office\n"
@@ -474,9 +360,9 @@ class FoodAccessChip(BaseSkillChip):
             "**What You'll Need:**\n"
             "- Proof of identity\n"
             "- Proof of income\n"
-            "- Social Security numbers\n"
-            "- Proof of housing costs\n\n"
-            "Tell me your household size and monthly income to check eligibility."
+            "- Social Security numbers for the household members who are applying (members who aren't applying "
+            "don't have to give one or their immigration status)\n"
+            "- Proof of housing costs\n"
         )
 
     async def _handle_meal_schedule(
@@ -506,17 +392,14 @@ class FoodAccessChip(BaseSkillChip):
 
         if not programs:
             return SkillResponse(
-                content="No community meal programs found matching your criteria.\n\n"
-                "**Other Options:**\n"
-                "- Find food pantries in your area\n"
-                "- Check Meals on Wheels eligibility\n"
-                "- Contact 211 for local resources",
+                content=(f"{not_connected('A meal program directory', 'I can\'t list community meals near you')} "
+                         "Call 211 and ask about free community meals; for older or homebound people, ask about "
+                         "home-delivered meals (such as Meals on Wheels).\n"
+                         + self._line("meal_program_line", "Your organization's meal line")),
                 success=True,
-                data={"programs": []},
+                data={"programs": [], "connected": False},
                 suggestions=[
                     "Find food pantries",
-                    "Check Meals on Wheels",
-                    "Call 211",
                 ],
             )
 
@@ -545,9 +428,7 @@ class FoodAccessChip(BaseSkillChip):
                 ],
             },
             suggestions=[
-                "Register for a meal program",
-                "Set up recurring pickup",
-                "Request delivery",
+                "Find food pantries",
             ],
         )
 
@@ -569,49 +450,8 @@ class FoodAccessChip(BaseSkillChip):
         Returns:
             List of matching meal programs
         """
-        # In production, this would query the meal_scheduler span
-        programs = [
-            MealProgram(
-                program_id="meal_001",
-                name="Community Kitchen",
-                location="Community Center, 789 Oak St",
-                meal_type="lunch",
-                schedule={
-                    "Monday": "11:30am-1pm",
-                    "Wednesday": "11:30am-1pm",
-                    "Friday": "11:30am-1pm",
-                },
-                dietary_accommodations=[
-                    DietaryRestriction.VEGETARIAN,
-                    DietaryRestriction.DIABETIC_FRIENDLY,
-                ],
-                registration_required=False,
-                delivery_available=False,
-                capacity=100,
-                current_signups=65,
-            ),
-            MealProgram(
-                program_id="meal_002",
-                name="Senior Meal Delivery",
-                location="Delivered to your home",
-                meal_type="dinner",
-                schedule={
-                    "Monday": "5pm delivery",
-                    "Tuesday": "5pm delivery",
-                    "Wednesday": "5pm delivery",
-                    "Thursday": "5pm delivery",
-                    "Friday": "5pm delivery",
-                },
-                dietary_accommodations=[
-                    DietaryRestriction.LOW_SODIUM,
-                    DietaryRestriction.DIABETIC_FRIENDLY,
-                ],
-                registration_required=True,
-                delivery_available=True,
-                capacity=50,
-                current_signups=42,
-            ),
-        ]
+        # No meal_scheduler span is wired yet: there are no programs to list, and none is made up.
+        programs: list[MealProgram] = []
 
         # Filter by delivery requirement
         if needs_delivery:
@@ -648,29 +488,14 @@ class FoodAccessChip(BaseSkillChip):
             donor_id=context.user_id,
         )
 
-        content = "**Thank You for Your Donation!**\n\n"
-        content += f"Donation ID: {result['donation_id']}\n"
-        content += f"Status: {result['status']}\n\n"
-
-        if pickup_needed:
-            content += "**Pickup Information:**\n"
-            content += f"- Scheduled: {result['pickup_time']}\n"
-            content += f"- Contact: {result['pickup_contact']}\n"
-        else:
-            content += "**Drop-off Locations:**\n"
-            for location in result['drop_off_locations']:
-                content += f"- {location['name']}: {location['address']}\n"
-                content += f"  Hours: {location['hours']}\n"
-
-        content += "\n**Accepted Items:**\n"
-        content += "- Non-perishable foods (cans, boxes, jars)\n"
-        content += "- Fresh produce (within 3 days of expiration)\n"
-        content += "- Frozen items (if dropping off same day)\n\n"
-
-        content += "**Not Accepted:**\n"
-        content += "- Expired items\n"
-        content += "- Opened packages\n"
-        content += "- Home-prepared foods\n"
+        content = "**Thank you for offering to donate.**\n\n"
+        content += (f"{not_connected('An inventory system', 'this offer has not been recorded or sent to anyone')}"
+                    + (" No pickup has been scheduled." if pickup_needed else "") + "\n\n")
+        line = self.contacts.get("donation_line")
+        content += (f"To donate, contact your organization's donation line: **{line}**.\n" if line else
+                    "To donate, contact your local food bank or pantry directly (211 can tell you which are near).\n")
+        content += ("Most pantries take unopened, unexpired non-perishables; ask yours what else it accepts, and "
+                    "whether it can pick up.\n")
 
         return SkillResponse(
             content=content,
@@ -680,9 +505,7 @@ class FoodAccessChip(BaseSkillChip):
             consensus_action=("approve_food_distribution" if result.get("large_donation") and not consent_given(context)
                               else None),
             suggestions=[
-                "Schedule recurring donation",
-                "Get donation receipt",
-                "Organize a food drive",
+                "Find food pantries",
             ],
         )
 
@@ -706,20 +529,12 @@ class FoodAccessChip(BaseSkillChip):
         Returns:
             Donation processing result
         """
-        # In production, this would interact with inventory_system span
+        # No inventory_system span is wired yet: nothing is recorded, scheduled or sent.
         return {
-            "donation_id": f"DON-{datetime.now().strftime('%Y%m%d')}-001",
-            "status": "Received",
-            "pickup_time": "Saturday, Feb 15, 10am-12pm" if pickup_needed else None,
-            "pickup_contact": "(510) 555-1234" if pickup_needed else None,
-            "drop_off_locations": [
-                {
-                    "name": "Community Food Bank",
-                    "address": "123 Main St",
-                    "hours": "M-F 9am-5pm, Sat 10am-2pm",
-                },
-            ],
-            "large_donation": quantity and quantity > 100,
+            "recorded": False,
+            "connected": False,
+            "pickup_scheduled": False,
+            "large_donation": bool(quantity and quantity > 100),
         }
 
     async def _handle_nutrition_info(
@@ -748,7 +563,7 @@ class FoodAccessChip(BaseSkillChip):
                 content += f"- {tip}\n"
 
         if info.get("resources"):
-            content += "\n**Resources:**\n"
+            content += "\n**Worth asking about locally:**\n"
             for resource in info["resources"]:
                 content += f"- {resource}\n"
 
@@ -757,9 +572,7 @@ class FoodAccessChip(BaseSkillChip):
             success=True,
             data={"topic": topic, "info": info},
             suggestions=[
-                "Find diabetic-friendly foods",
-                "Get recipes for dietary restrictions",
-                "Connect with a nutritionist",
+                "Find food pantries",
             ],
         )
 

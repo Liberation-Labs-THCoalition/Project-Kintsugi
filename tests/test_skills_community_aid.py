@@ -1151,13 +1151,9 @@ class TestFoodAccessChip:
         assert "household_size" in response.data or "income" in response.data
 
     @pytest.mark.asyncio
-    async def test_snap_income_limits_defined(self, food_chip: FoodAccessChip):
-        """Test SNAP income limits are defined."""
-        assert hasattr(food_chip, "SNAP_INCOME_LIMITS")
-        assert len(food_chip.SNAP_INCOME_LIMITS) > 0
-        # Should have limits for household sizes 1-8
-        assert 1 in food_chip.SNAP_INCOME_LIMITS
-        assert 4 in food_chip.SNAP_INCOME_LIMITS
+    async def test_no_stale_snap_limits_decide_anything(self, food_chip: FoodAccessChip):
+        """The FY2024 table is gone (10-19): limits change every October and differ by state, so no verdict is given."""
+        assert not hasattr(food_chip, "SNAP_INCOME_LIMITS")
 
     @pytest.mark.asyncio
     async def test_meal_schedule_intent(
@@ -1187,7 +1183,8 @@ class TestFoodAccessChip:
         )
         response = await food_chip.handle(request, context)
         assert response.success
-        assert "donation_id" in response.data
+        # Nothing is connected, so nothing was recorded (10-19: it used to give a donation ID and a pickup time)
+        assert response.data["recorded"] is False and "not been recorded" in response.content
 
 
 # ===========================================================================
