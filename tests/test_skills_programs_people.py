@@ -245,9 +245,8 @@ class TestBoardLiaisonChip:
             entities={"action": "list"},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "resolutions" in response.data
-        assert "summary" in response.data
+        # No resolutions store: none listed, none invented (10-19: four hard-coded resolutions with votes)
+        assert response.success and response.data["resolutions"] == [] and response.data["connected"] is False
 
     @pytest.mark.asyncio
     async def test_handle_compliance_check(self, chip, context):
@@ -257,9 +256,9 @@ class TestBoardLiaisonChip:
             entities={"include_overdue": True},
         )
         response = await chip.handle(request, context)
-        assert response.success
-        assert "compliance_items" in response.data
-        assert "summary" in response.data
+        # Nothing checked: a checklist, every item "not checked", never "compliant" (10-19)
+        assert response.success and response.data["compliance_items"]
+        assert {c["status"] for c in response.data["compliance_items"]} == {"not checked"}
 
     @pytest.mark.asyncio
     async def test_handle_board_report(self, chip, context):
@@ -802,10 +801,8 @@ class TestResponseStructure:
         response = await chip.handle(request, context)
 
         packet = response.data["meeting_packet"]
-        assert "packet_id" in packet
-        assert "meeting" in packet
-        assert "agenda_items" in packet
-        assert "attachments" in packet
+        assert "meeting" in packet and "agenda_items" in packet and "to_gather" in packet
+        assert packet["meeting"]["virtual_link"] is None and packet["action_items_from_prior"] is None
 
         # Verify agenda item structure
         for item in packet["agenda_items"]:

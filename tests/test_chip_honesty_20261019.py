@@ -61,7 +61,6 @@ PENDING_REPAIR: dict[str, str] = {
     "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
     "grant_hunter.py": "invented grants with fake URLs; every org told it's eligible",
     "coalition_builder.py": "'Outreach sent', 'Invitations sent'; placeholder metrics as measured",
-    "board_liaison.py": "invented minutes, motions, votes, compliance status and board report",
     "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
 }
 
@@ -241,6 +240,7 @@ REAL_CHIPS = {
     "SolidarityEconomyChip": "formation guidance and real networks; no invented co-op, balance, loan or cost (10-19)",
     "VolunteerCoordinatorChip": "the deployment's roster and sender or none; sends nothing it can't, saves nothing (10-19)",
     "DonorStewardshipChip": "drafts from what it's given, with [gaps]; no invented donor, tax fact or figure (10-19)",
+    "BoardLiaisonChip": "agendas, minutes and reports as drafts with [gaps]; no invented vote, status or figure (10-19)",
 }
 
 
@@ -881,3 +881,39 @@ async def test_a_cultivation_plan_is_a_draft_with_suggested_dates():
     plan = r.data["cultivation_plan"]
     assert plan["saved"] is False and all("suggested_date" in a and "scheduled_date" not in a for a in plan["activities"])
     assert "nothing has been saved or scheduled" in r.content and "education/youth" not in str(plan)
+
+
+# ---- board liaison: the repairs ----------------------------------------------------------------------------------------
+
+async def _board(intent, **entities):
+    from kintsugi.skills.programs_people.board_liaison import BoardLiaisonChip
+    return await BoardLiaisonChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_minutes_invent_no_attendee_motion_or_vote():
+    r = await _board("minutes_draft", meeting_id="m-1")
+    m = r.data["minutes"]
+    assert "J. Smith" not in str(m) and "Approved unanimously" not in str(m) and "6:00 PM" not in str(m)
+    assert m["proceedings"][1]["vote"] == "[For / against / abstain]" and "none is invented" in r.content
+    given = await _board("minutes_draft", attendees=["Ana", "Bo"], notes="Budget discussed.")
+    assert given.data["minutes"]["attendance"]["present"] == ["Ana", "Bo"]
+    assert given.data["minutes"]["notes_given"] == "Budget discussed."
+
+
+@pytest.mark.asyncio
+async def test_compliance_is_never_called_compliant_without_a_check():
+    r = await _board("compliance_check")
+    assert {c["status"] for c in r.data["compliance_items"]} == {"not checked"} and "isn't connected" in r.content
+    assert "compliant" not in r.content.replace("not checked", "")
+
+
+@pytest.mark.asyncio
+async def test_the_board_report_and_packet_invent_no_figure_or_meeting_detail():
+    rep = await _board("board_report", include_financials=True, include_programs=True)
+    assert "1250000" not in str(rep.data) and "92%" not in str(rep.data) and "[From your books]" in str(rep.data)
+    packet = await _board("meeting_prep")
+    assert "zoom.us" not in str(packet.data) and "minutes_2024" not in str(packet.data)
+    assert packet.data["meeting_packet"]["action_items_from_prior"] is None
+    res = await _board("resolution_track", action="list")
+    assert res.data["resolutions"] == [] and "FY2024" not in res.content
