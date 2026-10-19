@@ -444,7 +444,7 @@ class TestStaffOnboardingChip:
         response = await chip.handle(request, context)
         assert response.success
         assert "policy_review" in response.data
-        assert "policies" in response.data["policy_review"]
+        assert "checklist" in response.data["policy_review"]
 
     @pytest.mark.asyncio
     async def test_handle_checklist_status(self, chip, context):
@@ -455,8 +455,8 @@ class TestStaffOnboardingChip:
         )
         response = await chip.handle(request, context)
         assert response.success
-        assert "onboarding_progress" in response.data
-        assert "overall_progress" in response.data["onboarding_progress"]
+        assert response.data["onboarding_progress"] is None      # no HR system: progress isn't known (10-19)
+        assert "isn't connected" in response.content
 
     @pytest.mark.asyncio
     async def test_handle_onboard_complete(self, chip, context):
@@ -467,8 +467,8 @@ class TestStaffOnboardingChip:
         )
         response = await chip.handle(request, context)
         result = await _approved(chip, response, context)       # completing onboarding is held until approved
-        assert result["success"]
-        assert "completion_record" in result["data"]
+        assert not result["success"] and "no step" in result["content"]     # no HR system to record it in (10-19)
+        assert result["data"]["completion_record"] is None
 
 
 # ==============================================================================
@@ -852,15 +852,8 @@ class TestResponseStructure:
 
         rsvp_data = response.data["rsvp_data"]
         assert "event_id" in rsvp_data
-        assert "rsvps" in rsvp_data
-        assert "summary" in rsvp_data
-        assert "special_needs" in rsvp_data
-
-        # Verify summary structure
-        summary = rsvp_data["summary"]
-        assert "confirmed" in summary
-        assert "tentative" in summary
-        assert "declined" in summary
+        assert rsvp_data["rsvps"] == []                 # no RSVP system: nobody is listed, nobody invented (10-19)
+        assert rsvp_data["summary"] is None and rsvp_data["connected"] is False
 
     @pytest.mark.asyncio
     async def test_member_services_membership_structure(self, context):
@@ -913,7 +906,7 @@ class TestEdgeCases:
         )
         response = await chip.handle(request, context)
         result = await _approved(chip, response, context)       # held first; the chip's own check runs once approved
-        assert "completion_status" in result["data"] or "completion_record" in result["data"]
+        assert result["data"]["recorded"] is False and not result["success"]
 
     @pytest.mark.asyncio
     async def test_board_liaison_resolution_filtering(self, context):

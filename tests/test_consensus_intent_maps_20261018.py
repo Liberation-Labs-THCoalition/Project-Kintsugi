@@ -117,6 +117,7 @@ NO_STEP = {
     ("MutualAidCoordinatorChip", "match_request"), ("ImpactAuditorChip", "impact_report"),
     ("SolidarityEconomyChip", "time_bank"), ("FinanceAssistantChip", "invoice_create"),
     ("MemberServicesChip", "member_communicate"), ("MemberServicesChip", "membership_renew"),
+    ("StaffOnboardingChip", "onboard_complete"),
 }
 
 
@@ -186,8 +187,6 @@ async def test_approval_asks_again_exactly_where_the_chip_says_it_has_no_step(cl
     chip = cls()
     if (cls.__name__, intent) == ("MutualAidCoordinatorChip", "match_request"):
         chip, entities["confirm_match_id"] = await _a_real_match()
-    if (cls.__name__, intent) == ("StaffOnboardingChip", "onboard_complete"):
-        entities["force_complete"] = True
     ctx = SkillContext(org_id="org_maps", user_id="key:k-asker")
     held = await chip.handle(SkillRequest(intent=intent, raw_input="t", entities=entities), ctx)
     gate = get_consensus_gate()

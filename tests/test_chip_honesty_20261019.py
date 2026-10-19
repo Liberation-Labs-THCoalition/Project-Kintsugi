@@ -11,8 +11,8 @@ scan every chip's source, so a new stub can't bring them back:
 - no prose that claims an action (sent, notified, alerted, dispatched, scheduled, shared, "will call"...) unless the
   same sentence says it didn't happen, or the claim is listed here with the code that makes it true.
 
-Chips not yet repaired are listed in PENDING_REPAIR, with what's left, and skipped by the scans; the list may only
-shrink (a listed chip with nothing left fails until it's taken off). Meanwhile every response from a chip still on
+Every chip file is scanned. PENDING_REPAIR held the chips whose files still failed the scans, skipped meanwhile; it
+emptied on 2026-10-19 and must stay empty, so a new chip meets the scans on its first commit. Every response from a chip still on
 sample data says so first (BaseSkillChip.simulated), and these tests check that too.
 """
 from __future__ import annotations
@@ -58,8 +58,6 @@ def _walk_strings(path: Path):
 
 # Chip file -> what's still wrong in it. Repaired chips come off; nothing new goes on.
 PENDING_REPAIR: dict[str, str] = {
-    "event_planner.py": "invented venue, Zoom link, contacts, RSVPs, accessibility, results; 'Scheduled to send'",
-    "staff_onboarding.py": "invented progress and sign-offs; '90-day review scheduled'",
 }
 
 
@@ -180,30 +178,12 @@ def test_the_claim_pattern_catches_what_we_found():
         assert not (CLAIM.search(fine) and not NEGATED.search(fine)), fine
 
 
-# ---- the ratchet -----------------------------------------------------------------------------------------------------
+# ---- the repair list ------------------------------------------------------------------------------------------------
 
-@functools.lru_cache(maxsize=None)
-def _scan_everything():
-    """Every chip's scan findings, pending ones included, computed once: (file, text) pairs."""
-    found = [(f, t) for f, n, t in _all_strings(True) if PHONE.search(t) or URL.search(t)]
-    return tuple(found + [(f, t) for f, n, t in _claims(True)])
-
-
-def _violations(name):
-    out = [t for f, t in _scan_everything() if f.endswith("/" + name)]
-    path = next(p for p in CHIP_FILES if p.name == name)
-    for node in ast.walk(ast.parse(path.read_text())):
-        if (isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in ("datetime", "date")
-                and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, int)):
-            out.append(f"date at line {node.lineno}")
-    return out
-
-
-@pytest.mark.parametrize("name", sorted(PENDING_REPAIR))
-def test_a_chip_waiting_for_repair_still_needs_it(name):
-    """Fixed chips come off the list, so the scans cover them from then on."""
-    assert any(p.name == name for p in CHIP_FILES), f"{name} isn't a chip"
-    assert _violations(name), f"{name} passes every scan now: take it off PENDING_REPAIR"
+def test_no_chip_waits_for_repair():
+    """Emptied 2026-10-19: every chip file passes the scans above (some chips still run on sample data and say so).
+    Nothing goes back on the list."""
+    assert PENDING_REPAIR == {}
 
 
 # ---- the sample-mode mark --------------------------------------------------------------------------------------------
@@ -242,6 +222,8 @@ REAL_CHIPS = {
     "BoardLiaisonChip": "agendas, minutes and reports as drafts with [gaps]; no invented vote, status or figure (10-19)",
     "GrantHunterChip": "no invented grant, deadline or pipeline; eligibility unknown until it can be checked (10-19)",
     "CoalitionBuilderChip": "real records; says nothing was sent or invited; metrics only from its records (10-19)",
+    "StaffOnboardingChip": "plans as drafts, training as suggestions; no invented policy, progress or sign-off (10-19)",
+    "EventPlannerChip": "drafts and checklists; no invented venue, RSVP, contact, link or result; books and sends nothing (10-19)",
 }
 
 
@@ -965,3 +947,108 @@ async def test_the_report_carries_no_placeholder_metric():
     metrics = r.data["metrics"]
     assert set(metrics) == {"outreach_recorded", "outreach_responded"} and "0.82" not in str(r.data)
     assert "isn't applied" in r.content
+
+
+# ---- staff onboarding: the repairs -------------------------------------------------------------------------------------
+
+async def _onboarding(intent, **entities):
+    from kintsugi.skills.programs_people.staff_onboarding import StaffOnboardingChip
+    return await StaffOnboardingChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_a_plan_is_a_draft_and_training_is_suggested_not_assigned():
+    p = await _onboarding("onboard_start", employee_name="Ana", department="programs")
+    plan = p.data["onboarding_plan"]
+    assert plan["status"] == "draft" and plan["saved"] is False and "Initialized" not in p.content
+    assert "has not been saved" in p.content and not any("schedule" in s.lower() for s in p.suggestions)
+    t = await _onboarding("training_assign", department="finance")
+    assert t.data["training_assignment"]["assigned"] is False and "Suggested" in t.content
+    assert "none has been assigned" in t.content and "Assigned" not in t.content
+
+
+@pytest.mark.asyncio
+async def test_no_policy_version_or_link_and_no_employee_progress_is_invented():
+    r = await _onboarding("policy_review", employee_id="e-1")
+    assert "2024.1" not in str(r.data) and "/policies/" not in str(r.data) and "Retrieved" not in r.content
+    assert r.data["policy_review"]["connected"] is False and "isn't connected" in r.content
+    c = await _onboarding("checklist_status", employee_id="e-1")
+    assert c.data["onboarding_progress"] is None and "Jane Smith" not in str(c.data) and "65" not in c.content
+    assert "progressing" not in c.content
+
+
+@pytest.mark.asyncio
+async def test_completion_claims_nothing_even_when_forced():
+    from kintsugi.skills.programs_people.staff_onboarding import StaffOnboardingChip
+    chip = StaffOnboardingChip()
+    # the handler itself, past the hold: what an approved run would get
+    r = await chip._complete_onboarding(SkillRequest(intent="onboard_complete", raw_input="x", entities={
+        "employee_id": "e-1", "force_complete": True}), _ctx(), {})
+    assert not r.success and r.data["recorded"] is False and r.data["completion_record"] is None
+    assert r.requires_consensus and r.consensus_action == "complete_onboarding"     # asks again: "no step"
+    for made_up in ("ompleted in", "acknowledged.", "90-day", "certificate", "signoff"):
+        assert made_up not in r.content, made_up
+    assert "not recorded as complete" in r.content and _claims_in(r.content) == []
+
+
+# ---- event planner: the repairs ----------------------------------------------------------------------------------------
+
+async def _event(intent, **entities):
+    from kintsugi.skills.programs_people.event_planner import EventPlannerChip
+    return await EventPlannerChip().handle(SkillRequest(intent=intent, raw_input="x", entities=entities), _ctx())
+
+
+@pytest.mark.asyncio
+async def test_an_event_is_a_draft_with_no_made_up_link_or_settled_date():
+    v = await _event("event_create", event_name="Town hall", virtual=True)
+    e = v.data["event"]
+    assert e["virtual_link"] is None and "zoom" not in str(v.data).lower() and e["saved"] is False
+    assert "no video link" in v.content and "placeholder" in v.content and "Created" not in v.content
+    assert "has not been saved, published or booked" in v.content
+    assert next(c for c in e["checklist"] if c["item"] == "Confirm date and time")["completed"] is False
+    assert not any("publish" in s.lower() or "venue availability" in s.lower() for s in v.suggestions)
+    try:                                     # a date typed without a zone used to crash (naive minus aware)
+        g = await _event("event_create", event_name="Town hall", event_date="2026-11-20T18:00:00",
+                         virtual=True, virtual_link="https://meet.example.org/abc")
+    except TypeError as e:
+        pytest.fail(f"a date without a timezone crashed the chip: {e}")
+    assert g.data["event"]["virtual_link"] == "https://meet.example.org/abc" and "no video link" not in g.content
+    assert next(c for c in g.data["event"]["checklist"] if c["item"] == "Confirm date and time")["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_no_rsvp_is_invented_or_claimed_recorded():
+    r = await _event("event_rsvp", event_id="e-1")
+    assert r.data["rsvp_data"]["rsvps"] == [] and "Alice" not in str(r.data) and "confirmed (" not in r.content
+    a = await _event("event_rsvp", event_id="e-1", action="add", attendee={"name": "Sam"})
+    assert a.data["rsvp_data"]["recorded"] is False and "has not been recorded" in a.content
+
+
+@pytest.mark.asyncio
+async def test_logistics_invent_no_venue_vendor_contact_or_spending():
+    r = await _event("event_logistics", expected_attendance=40, budget=2000)
+    lg = r.data["logistics"]
+    assert lg["booked"] is False and lg["venue"]["confirmed"] is False and "Oak Street" not in str(lg)
+    assert lg["budget_tracking"] == {"allocated": 2000, "committed": None, "spent": None, "tracked": False}
+    assert all(c["phone"] is None for c in lg["emergency_contacts"]) and "555" not in str(lg)
+    assert not r.requires_consensus and "Venue confirmed" not in r.content and "nothing is booked" in r.content
+
+
+@pytest.mark.asyncio
+async def test_accessibility_is_unchecked_and_the_statement_has_a_gap_for_the_contact():
+    r = await _event("event_accessibility", venue="Arcata Library")
+    acc = r.data["accessibility"]
+    assert acc["checked"] is False and acc["overall_assessment"] is None and acc["registration_requests"] is None
+    assert all(f["available"] is None for fs in acc["features"].values() for f in fs) and "Room 105" not in str(acc)
+    assert "[contact email or phone]" in acc["accessibility_statement"] and "events@" not in str(acc)
+    assert "none checked" in r.content
+
+
+@pytest.mark.asyncio
+async def test_a_followup_is_a_draft_with_gaps_and_nothing_scheduled():
+    r = await _event("event_followup", followup_type="impact")
+    f = r.data["followup"]
+    assert f["sent"] is False and f["scheduled_send"] is None and f["recipients"]["count"] is None
+    assert "15,000" not in str(f) and "survey.organization.org" not in str(f) and "gift card" not in str(f)
+    assert "Scheduled to send" not in r.content and "nothing has been sent or scheduled" in r.content
+    assert not r.requires_consensus and _claims_in(r.content) == []

@@ -25,6 +25,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.skills.honesty import not_connected
 from kintsugi.skills import (
     BaseSkillChip,
     EFEWeights,
@@ -34,7 +35,6 @@ from kintsugi.skills import (
     SkillRequest,
     SkillResponse,
 )
-from kintsugi.skills.base import consent_given
 
 
 @dataclass
@@ -124,12 +124,16 @@ class StaffOnboardingChip(BaseSkillChip):
     consensus_intents = {"onboard_complete": "complete_onboarding"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"complete_onboarding": "GENERAL"}
+    consensus_no_step = {"complete_onboarding": "no HR system is connected, so completion isn't recorded"}
     consensus_unreachable = {
         "grant_system_access": "no intent performs this yet: declared for a future one, so it can't happen ungated",
         "update_employee_record": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }
 
     required_spans = ["hris_api", "training_lms", "document_store"]
+    # Honest without its spans (kintsugi/skills/honesty.py): plans and training lists are drafts and suggestions, not
+    # saved or assigned; no employee's progress, sign-off or score is invented; completion isn't recorded.
+    simulated = False
 
     async def handle(self, request: SkillRequest, context: SkillContext) -> SkillResponse:
         """Route request to appropriate handler based on intent.
@@ -164,7 +168,7 @@ class StaffOnboardingChip(BaseSkillChip):
                 success=False,
                 suggestions=[
                     "Try 'onboard_start' to begin onboarding",
-                    "Try 'training_assign' to assign training",
+                    "Try 'training_assign' to suggest training",
                     "Try 'checklist_status' to check progress",
                 ],
             )
@@ -206,11 +210,7 @@ class StaffOnboardingChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Initialize onboarding plan for new employee.
-
-        Creates comprehensive onboarding plan with checklist, training
-        requirements, and timeline.
-        """
+        """Draft an onboarding plan for a new employee: checklist and timeline, not saved (no HR system)."""
         employee_id = request.entities.get("employee_id", "")
         employee_name = request.entities.get("employee_name", "New Employee")
         department = request.entities.get("department", "general")
@@ -324,15 +324,15 @@ class StaffOnboardingChip(BaseSkillChip):
             department=department,
             start_date=start_dt,
             supervisor=supervisor,
-            status="in_progress",
+            status="draft",
             target_completion=target_completion,
             checklist_items=checklist_items,
         )
 
         return SkillResponse(
-            content=f"Initialized onboarding for {employee_name} in {department} department. "
-                    f"Start date: {start_dt.strftime('%B %d, %Y')}. "
-                    f"Plan includes {len(checklist_items)} checklist items with 30-day target completion.",
+            content=(f"Draft onboarding plan for {employee_name} ({department}), starting "
+                     f"{start_dt.strftime('%B %d, %Y')}: {len(checklist_items)} checklist items over 30 days. "
+                     f"{not_connected('An HR system', 'it has not been saved and nobody has been assigned anything')}"),
             success=True,
             data={
                 "onboarding_plan": {
@@ -343,15 +343,12 @@ class StaffOnboardingChip(BaseSkillChip):
                     "start_date": plan.start_date.isoformat(),
                     "supervisor": plan.supervisor,
                     "status": plan.status,
+                    "saved": False,
                     "target_completion": plan.target_completion.isoformat() if plan.target_completion else None,
                     "checklist_items": plan.checklist_items,
                 },
             },
-            suggestions=[
-                "Would you like to assign training modules?",
-                "Should I schedule the welcome meeting?",
-                "Want to customize the checklist?",
-            ],
+            suggestions=["Suggest training modules", "Want to customize the checklist?"],
         )
 
     async def _assign_training(
@@ -360,11 +357,7 @@ class StaffOnboardingChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Assign training modules to employee.
-
-        Creates training assignments based on role, department, and
-        compliance requirements.
-        """
+        """Suggest training modules by role and department; none is assigned (no learning system)."""
         employee_id = request.entities.get("employee_id", "")
         department = request.entities.get("department", "general")
         include_optional = request.entities.get("include_optional", False)
@@ -533,7 +526,7 @@ class StaffOnboardingChip(BaseSkillChip):
         training_data = {
             "employee_id": employee_id,
             "department": department,
-            "assigned_at": now.isoformat(),
+            "assigned": False,
             "modules": [
                 {
                     "module_id": m.module_id,
@@ -558,15 +551,12 @@ class StaffOnboardingChip(BaseSkillChip):
         }
 
         return SkillResponse(
-            content=f"Assigned {len(all_modules)} training modules for {department} employee. "
-                    f"Total estimated time: {training_data['summary']['estimated_hours']} hours.",
+            content=(f"Suggested {len(all_modules)} training modules for a {department} employee, about "
+                     f"{training_data['summary']['estimated_hours']} hours. "
+                     f"{not_connected('A learning system', 'none has been assigned')}"),
             success=True,
             data={"training_assignment": training_data},
-            suggestions=[
-                "Would you like to schedule specific training sessions?",
-                "Should I send the training assignments to the employee?",
-                "Want to add additional modules?",
-            ],
+            suggestions=["Want to add additional modules?"],
         )
 
     async def _get_policy_docs(
@@ -575,108 +565,29 @@ class StaffOnboardingChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Retrieve policy documents for review and acknowledgment.
-
-        Returns required policies with acknowledgment tracking.
-        """
+        """A checklist of policies new staff usually get; the organization's own aren't known (no document store)."""
         employee_id = request.entities.get("employee_id", "")
         category = request.entities.get("category", None)
 
-        policies = [
-            PolicyDocument(
-                policy_id="pol_001",
-                title="Employee Handbook",
-                category="hr",
-                version="2024.1",
-                acknowledgment_required=True,
-            ),
-            PolicyDocument(
-                policy_id="pol_002",
-                title="Code of Conduct",
-                category="ethics",
-                version="2024.1",
-                acknowledgment_required=True,
-            ),
-            PolicyDocument(
-                policy_id="pol_003",
-                title="Anti-Harassment Policy",
-                category="hr",
-                version="2024.1",
-                acknowledgment_required=True,
-            ),
-            PolicyDocument(
-                policy_id="pol_004",
-                title="Information Security Policy",
-                category="operations",
-                version="2024.1",
-                acknowledgment_required=True,
-            ),
-            PolicyDocument(
-                policy_id="pol_005",
-                title="Conflict of Interest Policy",
-                category="ethics",
-                version="2024.1",
-                acknowledgment_required=True,
-            ),
-            PolicyDocument(
-                policy_id="pol_006",
-                title="Travel and Expense Policy",
-                category="operations",
-                version="2023.2",
-                acknowledgment_required=False,
-            ),
-            PolicyDocument(
-                policy_id="pol_007",
-                title="Workplace Safety Manual",
-                category="safety",
-                version="2024.1",
-                acknowledgment_required=True,
-            ),
-            PolicyDocument(
-                policy_id="pol_008",
-                title="Remote Work Guidelines",
-                category="operations",
-                version="2024.1",
-                acknowledgment_required=False,
-            ),
+        # No document store is connected: the organization's own policies, versions and acknowledgments aren't known.
+        # A checklist of the policies most organizations give new staff, to match against your own.
+        checklist = [
+            {"title": "Employee handbook", "category": "hr"},
+            {"title": "Code of conduct", "category": "ethics"},
+            {"title": "Anti-harassment policy", "category": "hr"},
+            {"title": "Information security policy", "category": "operations"},
+            {"title": "Conflict of interest policy", "category": "ethics"},
+            {"title": "Workplace safety procedures", "category": "safety"},
         ]
-
-        # Filter by category if specified
         if category:
-            policies = [p for p in policies if p.category == category]
-
-        policy_data = {
-            "employee_id": employee_id,
-            "policies": [
-                {
-                    "policy_id": p.policy_id,
-                    "title": p.title,
-                    "category": p.category,
-                    "version": p.version,
-                    "acknowledgment_required": p.acknowledgment_required,
-                    "acknowledged": p.acknowledged,
-                    "document_url": f"/policies/{p.policy_id}/{p.version}",
-                }
-                for p in policies
-            ],
-            "summary": {
-                "total_policies": len(policies),
-                "requiring_acknowledgment": len([p for p in policies if p.acknowledgment_required]),
-                "acknowledged": len([p for p in policies if p.acknowledged]),
-                "pending": len([p for p in policies if p.acknowledgment_required and not p.acknowledged]),
-            },
-        }
-
+            checklist = [c for c in checklist if c["category"] == category]
         return SkillResponse(
-            content=f"Retrieved {len(policies)} policy documents. "
-                    f"{policy_data['summary']['pending']} policies pending acknowledgment.",
+            content=(not_connected("A document store", "I can't show your policies or track acknowledgments")
+                     + f" A checklist of {len(checklist)} policies most organizations give new staff, to match against "
+                     f"your own."),
             success=True,
-            data={"policy_review": policy_data},
-            suggestions=[
-                "Would you like to record an acknowledgment?",
-                "Should I send policy links to the employee?",
-                "Want to see a specific policy category?",
-            ],
+            data={"policy_review": {"employee_id": employee_id, "checklist": checklist, "connected": False}},
+            suggestions=[],
         )
 
     async def _check_progress(
@@ -685,90 +596,15 @@ class StaffOnboardingChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Check onboarding progress and completion status.
-
-        Returns progress metrics across all onboarding components.
-        """
+        """Onboarding progress: not known without an HR system, and never invented."""
         employee_id = request.entities.get("employee_id", "")
         plan_id = request.entities.get("plan_id", "")
 
-        # Simulated progress data (would query actual records)
-        progress = {
-            "employee_id": employee_id,
-            "plan_id": plan_id or f"onb_{uuid4().hex[:8]}",
-            "employee_name": "Jane Smith",
-            "department": "programs",
-            "start_date": (datetime.now(timezone.utc) - timedelta(days=12)).isoformat(),
-            "days_in_role": 12,
-            "target_completion_days": 30,
-            "overall_progress": 65,
-            "status": "on_track",
-            "checklist_progress": {
-                "total_items": 10,
-                "completed": 6,
-                "in_progress": 2,
-                "not_started": 2,
-                "completion_percentage": 60,
-                "items_by_status": {
-                    "completed": [
-                        "Welcome meeting with supervisor",
-                        "Workspace and equipment setup",
-                        "HR paperwork completion",
-                        "System access provisioning",
-                        "Organization overview training",
-                        "Required policy reviews",
-                    ],
-                    "in_progress": [
-                        "Department-specific training",
-                        "Meet with key stakeholders",
-                    ],
-                    "not_started": [
-                        "Initial project assignment",
-                        "30-day check-in meeting",
-                    ],
-                },
-            },
-            "training_progress": {
-                "total_modules": 7,
-                "completed": 5,
-                "in_progress": 1,
-                "not_started": 1,
-                "completion_percentage": 71,
-                "required_completed": "4 of 5",
-                "role_specific_completed": "1 of 2",
-            },
-            "policy_progress": {
-                "total_requiring_acknowledgment": 6,
-                "acknowledged": 5,
-                "pending": 1,
-                "completion_percentage": 83,
-            },
-            "upcoming_deadlines": [
-                {
-                    "item": "Department-specific training",
-                    "due_date": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
-                    "days_remaining": 2,
-                },
-                {
-                    "item": "Initial project assignment",
-                    "due_date": (datetime.now(timezone.utc) + timedelta(days=9)).isoformat(),
-                    "days_remaining": 9,
-                },
-            ],
-            "blockers": [],
-            "notes": "Employee is progressing well. Strong engagement with training materials.",
-        }
-
         return SkillResponse(
-            content=f"Onboarding progress for {progress['employee_name']}: {progress['overall_progress']}% complete. "
-                    f"Day {progress['days_in_role']} of {progress['target_completion_days']}. Status: {progress['status']}.",
+            content=not_connected("An HR system", f"I can't see {employee_id or 'this employee'}'s onboarding progress"),
             success=True,
-            data={"onboarding_progress": progress},
-            suggestions=[
-                "Would you like to address any blockers?",
-                "Should I send a progress update to the supervisor?",
-                "Want to mark any items complete?",
-            ],
+            data={"onboarding_progress": None, "connected": False},
+            suggestions=[],
         )
 
     async def _complete_onboarding(
@@ -777,82 +613,19 @@ class StaffOnboardingChip(BaseSkillChip):
         context: SkillContext,
         bdi: dict[str, Any],
     ) -> SkillResponse:
-        """Finalize onboarding and mark as complete.
-
-        Validates all requirements are met and generates completion
-        documentation.
-        """
+        """Completion can't be checked or recorded without an HR system; the approved run reports no step."""
         employee_id = request.entities.get("employee_id", "")
         plan_id = request.entities.get("plan_id", "")
         force_complete = request.entities.get("force_complete", False)
 
-        # Simulated completion check
-        completion_check = {
-            "checklist_complete": True,
-            "training_complete": True,
-            "policies_acknowledged": False,  # One pending
-            "systems_access_confirmed": True,
-            "supervisor_signoff": True,
-        }
-
-        all_complete = all(completion_check.values())
-
-        if not all_complete and not force_complete:
-            incomplete_items = [k for k, v in completion_check.items() if not v]
-            return SkillResponse(
-                content=f"Cannot complete onboarding. Outstanding items: {', '.join(incomplete_items)}.",
-                success=False,
-                data={
-                    "completion_status": completion_check,
-                    "ready_to_complete": False,
-                },
-                suggestions=[
-                    "Would you like to address the outstanding items?",
-                    "Should I send reminders for pending items?",
-                    "Use force_complete to override (not recommended)?",
-                ],
-            )
-
-        now = datetime.now(timezone.utc)
-
-        completion_record = {
-            "completion_id": f"cmp_{uuid4().hex[:8]}",
-            "employee_id": employee_id,
-            "plan_id": plan_id,
-            "completion_date": now.isoformat(),
-            "days_to_complete": 28,
-            "completion_status": completion_check,
-            "forced": force_complete,
-            "signoffs": {
-                "hr": {"name": "HR Manager", "date": now.isoformat()},
-                "supervisor": {"name": "Department Supervisor", "date": (now - timedelta(days=1)).isoformat()},
-                "it": {"name": "IT Administrator", "date": (now - timedelta(days=5)).isoformat()},
-            },
-            "training_summary": {
-                "modules_completed": 7,
-                "total_hours": 8.5,
-                "average_score": 92.3,
-            },
-            "next_steps": [
-                "90-day performance review scheduled",
-                "Professional development planning",
-                "Team integration activities",
-            ],
-        }
-
-        requires_approval = self.requires_consensus("complete_onboarding") and not consent_given(context)
-
+        # Nothing can be checked or recorded: no HR system is connected. The approved run asks again, so the consumer
+        # records "no step" (consensus_no_step) rather than a completion that didn't happen.
         return SkillResponse(
-            content=f"Onboarding completed for employee {employee_id}. "
-                    f"Completed in {completion_record['days_to_complete']} days. "
-                    f"All required training and policies acknowledged.",
-            success=True,
-            data={"completion_record": completion_record},
-            requires_consensus=requires_approval,
-            consensus_action="complete_onboarding" if requires_approval else None,
-            suggestions=[
-                "Would you like to generate a completion certificate?",
-                "Should I schedule the 90-day review?",
-                "Want to send a welcome completion message?",
-            ],
+            content=(f"Onboarding for {employee_id or 'this employee'} not recorded as complete: "
+                     + not_connected("An HR system", "I can't check what is done or record completion")),
+            success=False,
+            data={"completion_record": None, "recorded": False, "forced": bool(force_complete)},
+            requires_consensus=True,
+            consensus_action="complete_onboarding",
+            suggestions=[],
         )
