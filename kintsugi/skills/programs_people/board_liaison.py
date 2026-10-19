@@ -120,6 +120,7 @@ class BoardLiaisonChip(BaseSkillChip):
     consensus_intents = {"resolution_track": "record_resolution"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"record_resolution": "GENERAL"}
+    consensus_no_step = {"record_resolution": "resolutions aren't stored anywhere yet"}
     consensus_when = {
         "resolution_track": lambda r: r.entities.get("action") == "create",
     }

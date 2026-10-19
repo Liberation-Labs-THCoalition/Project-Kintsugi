@@ -132,6 +132,7 @@ class KnowYourRightsChip(BaseSkillChip):
     consensus_intents = {"legal_clinic": "schedule_legal_clinic"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"schedule_legal_clinic": "GENERAL"}
+    consensus_no_step = {"schedule_legal_clinic": "clinic scheduling isn't connected"}
     consensus_when = {
         "legal_clinic": lambda r: r.entities.get("action", "find") == "schedule",
     }

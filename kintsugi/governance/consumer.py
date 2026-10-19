@@ -14,7 +14,7 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from kintsugi.governance.consensus import ConsentCategory, payload_digest, get_consensus_gate
+from kintsugi.governance.consensus import MAX_RUN_ATTEMPTS, ConsentCategory, get_consensus_gate, payload_digest
 from kintsugi.skills.base import (RESERVED_PARAMETERS, SkillContext, SkillRequest, SkillResponse, failure_reference,
                                   is_shell_capable)
 
@@ -65,16 +65,20 @@ def _category(chip, action: str) -> ConsentCategory:
 def hold(chip, request, context, action: str) -> SkillResponse:
     """Submit the request to the gate instead of running it. Nothing the chip would do has happened."""
     payload = request_payload(chip.name, request, context, action)
+    from kintsugi.security.api_keys import person_of
     item = get_consensus_gate().submit(context.org_id, _category(chip, action), f"{chip.name}: {action}", payload,
-                                       requester=context.user_id)
+                                       requester=context.user_id, requester_person=person_of(context.user_id))
     logger.info("held %s (%s) for consent as %s", chip.name, action, item.id)
+    no_step = (getattr(chip, "consensus_no_step", None) or {}).get(action)
+    note = (f" Approving it records the decision, but this skill has no step that carries it out yet ({no_step}), "
+            f"so nothing will happen automatically." if no_step else "")
     return SkillResponse(
         content=(f"This needs approval before it happens ({action}). Nothing has been done yet; it's waiting for "
-                 f"approval as request {item.id}."),
+                 f"approval as request {item.id}.{note}"),
         success=True,
         requires_consensus=True,
         consensus_action=action,
-        data={"consent_id": item.id, "status": item.status.value, "action": action},
+        data={"consent_id": item.id, "status": item.status.value, "action": action, "no_step": bool(no_step)},
         metadata={"held": True},
     )
 
@@ -127,15 +131,22 @@ async def execute_approved(item_id: str, org_id: str, registry=None) -> dict:
                                platform=p["platform"], metadata={CONSENT_TOKEN: token, "consent_id": item.id})
         with _lock:
             _live.add(token)
+        raised = False
         try:
             response = await chip.handle(request, context)
         except Exception:
+            raised = True
             ref = failure_reference(logger, f"approved item {item.id}")
-            response = SkillResponse(content=f"the approved action couldn't complete (error {ref})", success=False)
+            retry = " It can be retried once." if item.attempts < MAX_RUN_ATTEMPTS else ""
+            response = SkillResponse(content=f"the approved action couldn't complete (error {ref}); nothing was "
+                                             f"done.{retry}", success=False)
         finally:
             with _lock:
                 _live.discard(token)
         result = {"success": response.success, "content": response.content, "data": response.data}
+        if raised:
+            gate.record_result(item.id, result, org_id=org_id, failed=True)
+            return result
         if response.metadata.get("held") or response.requires_consensus:
             # The chip asked again instead of acting: it has no approved path for this action yet. Say so plainly
             # rather than report the action done.

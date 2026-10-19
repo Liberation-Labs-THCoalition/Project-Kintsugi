@@ -23,12 +23,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_PERSONALITY_DIR = Path(__file__).resolve().parent.parent / "config" / "personalities"
 
 
+def _unread_consensus_actions(name: str, safety_raw: dict) -> list:
+    """A personality's safety.consensus_actions gates nothing, so say so instead of letting it look like protection."""
+    actions = list(safety_raw.get("consensus_actions", []))
+    if actions:
+        logger.warning("personality %s declares safety.consensus_actions %s, which nothing reads: consent is declared "
+                       "per chip (consensus_intents)", name, actions)
+    return actions
+
+
 @dataclass
 class SafetyConfig:
     """Safety posture for one personality."""
 
     oracle_mode: str = "observe"  # off | observe | enforce
     max_actions_per_turn: int = 5
+    # Read by nothing: consent is declared per chip (consensus_intents) and held in BaseSkillChip's wrapper. Kept so
+    # old personality files still load; a non-empty list is warned about (Vera, 10-18 follow-ons).
     consensus_actions: list[str] = field(default_factory=list)
     # Oracle flag score above which a response is blocked in enforce mode.
     block_threshold: float = 0.8
@@ -111,7 +122,7 @@ class AgentPersonality:
             safety=SafetyConfig(
                 oracle_mode=safety_raw.get("oracle_mode", "observe"),
                 max_actions_per_turn=int(safety_raw.get("max_actions_per_turn", 5)),
-                consensus_actions=list(safety_raw.get("consensus_actions", [])),
+                consensus_actions=_unread_consensus_actions(raw.get("name", ""), safety_raw),
                 block_threshold=float(safety_raw.get("block_threshold", 0.8)),
             ),
             metadata=raw.get("metadata", {}) or {},

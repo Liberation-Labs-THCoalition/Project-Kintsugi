@@ -255,6 +255,7 @@ class FinanceAssistantChip(BaseSkillChip):
         "invoice_create": lambda r: bool(r.entities.get("client_name")) and bool(r.entities.get("amount")),
     }
     consensus_categories = {"create_invoice": "FINANCIAL"}
+    consensus_no_step = {"create_invoice": "no invoice is created or stored"}
     consensus_unreachable = {
         "approve_expense": "no intent performs this yet: declared for a future one, so it can't happen ungated",
         "transfer_funds": "no intent performs this yet: declared for a future one, so it can't happen ungated",

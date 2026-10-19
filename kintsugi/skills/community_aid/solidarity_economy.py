@@ -160,6 +160,7 @@ class SolidarityEconomyChip(BaseSkillChip):
     consensus_intents = {"time_bank": "time_bank_withdrawal"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"time_bank_withdrawal": "FINANCIAL"}
+    consensus_no_step = {"time_bank_withdrawal": "no time-bank balance is changed"}
     consensus_when = {
         "time_bank": lambda r: r.entities.get("action") == "exchange" and (r.entities.get("hours") or 0) > 5,
     }

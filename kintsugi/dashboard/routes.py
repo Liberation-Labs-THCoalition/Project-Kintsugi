@@ -28,7 +28,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"], include_in_schema=Fa
                    dependencies=[Depends(require_admin)])
 
 # The dashboard's own chat sessions, one per personality, created lazily.
-_chat_sessions: dict[str, str] = {}
+_chat_sessions: dict[tuple, str] = {}   # (org, key, personality) -> session id
 
 
 def _context(request: Request) -> dict:
@@ -103,17 +103,21 @@ async def action_chat(
     request: Request,
     message: str = Form(...),
     personality: str = Form("default"),
+    principal: Principal = Depends(require_admin),
 ) -> HTMLResponse:
     sessions = get_session_manager()
     turn = None
     error = None
+    # The dashboard acts as the admin's own key, in the admin's own org, like every other route: it used to be user
+    # "dashboard" in org "default", so a held action's asker and org were wrong (Vera, 10-18 follow-ons).
+    who, key = f"key:{principal.key_id}", (principal.org_id, principal.key_id, personality)
     try:
-        session_id = _chat_sessions.get(personality)
+        session_id = _chat_sessions.get(key)
         if session_id is None or session_id not in {s.id for s in sessions.list()}:
-            session = sessions.create(personality=personality, user_id="dashboard")
-            _chat_sessions[personality] = session.id
+            session = sessions.create(personality=personality, org_id=principal.org_id, user_id=who)
+            _chat_sessions[key] = session.id
             session_id = session.id
-        turn = (await sessions.send_message(session_id, message)).to_dict()
+        turn = (await sessions.send_message(session_id, message, user_id=who)).to_dict()
     except Exception as exc:
         logger.warning("dashboard chat failed: %s", exc)
         error = str(exc)
