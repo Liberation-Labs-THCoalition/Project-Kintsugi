@@ -461,14 +461,15 @@ class org_scoped:
         obj.__dict__.setdefault("_org_stores", {})[self._key(obj)] = value
 
 
-def _asks_for(cls, intent, request) -> bool:
+def _asks_for(chip, intent, request, context) -> bool:
     """Whether this request asks for its intent's consensus action. With no predicate, every call does; a predicate
-    that fails counts as asking, so an error holds rather than runs."""
-    when = (cls.consensus_when or {}).get(intent)
+    that fails counts as asking, so an error holds rather than runs. A predicate given as a method name is called as
+    chip.method(request, context), for a condition that depends on the chip's own records (a per-requester count)."""
+    when = (type(chip).consensus_when or {}).get(intent)
     if when is None:
         return True
     try:
-        return bool(when(request))
+        return bool(getattr(chip, when)(request, context) if isinstance(when, str) else when(request))
     except Exception:
         return True
 
@@ -540,8 +541,13 @@ class BaseSkillChip(ABC):
     consensus_unreachable: dict[str, str] = {}
     # Optional: action -> ConsentCategory value (default GENERAL, one approval; FINANCIAL and PII need two).
     consensus_categories: dict[str, str] = {}
+    # Held actions this chip can't yet carry out once approved (its handler only ever asks): action -> why. The hold
+    # says so at once, so nobody approves expecting something to happen (Vera, 10-18 follow-ons). Still held, so an
+    # act step added later is gated from its first day.
+    consensus_no_step: dict[str, str] = {}
     # Optional: intent -> predicate on the request, for an intent that asks for its act only sometimes (a campaign
-    # message vs its launch). It mirrors the chip's own condition, and is decided before the chip runs.
+    # message vs its launch). It mirrors the chip's own condition, and is decided before the chip runs. A method name
+    # instead of a function is called as self.method(request, context).
     consensus_when: dict = {}
 
     # Capabilities this chip uses
@@ -565,7 +571,7 @@ class BaseSkillChip(ABC):
                 # this is the approved replay (kintsugi/governance/consumer.py; Vera's re-check, 2026-10-18).
                 intent = getattr(request, "intent", None)
                 action = (type(self).consensus_intents or {}).get(intent)
-                if action and _asks_for(type(self), intent, request):
+                if action and _asks_for(self, intent, request, context):
                     from kintsugi.governance import consumer
                     md = getattr(context, "metadata", None) or {}
                     done = md.get(CONSENT_REDEEMED)

@@ -42,7 +42,7 @@ from kintsugi.skills import (
     SkillResponse,
     register_chip,
 )
-from kintsugi.skills.base import consent_given
+from kintsugi.skills.base import consent_given, org_scoped
 
 
 class VolunteerStatus(str, Enum):
@@ -194,10 +194,12 @@ class VolunteerCoordinatorChip(BaseSkillChip):
     consensus_intents = {"volunteer_notify": "mass_notification"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"mass_notification": "EXTERNAL_COMMS"}
-    consensus_when = {
-        "volunteer_notify": (lambda r: r.entities.get("volunteer_ids", []) == "all"
-            or len(r.entities.get("volunteer_ids", [])) > 10),
-    }
+    # A method, not a lambda: "mass" counts what this requester has already sent in the last day, so ten batches of
+    # ten aren't ten small notices (Vera, 10-18 follow-ons).
+    consensus_when = {"volunteer_notify": "_asks_mass"}
+    MASS_LIMIT = 10
+    MASS_WINDOW_HOURS = 24
+    _notified = org_scoped(dict)          # sender (person_of) -> [(when, how many), ...], this org's alone
     consensus_unreachable = {
         "schedule_change_all": "no intent performs this yet: declared for a future one, so it can't happen ungated",
     }
@@ -400,7 +402,7 @@ class VolunteerCoordinatorChip(BaseSkillChip):
             )
 
         # Check if this is a mass notification requiring consensus
-        is_mass = volunteer_ids == "all" or len(volunteer_ids) > 10
+        is_mass = self._asks_mass(request, context)
         if is_mass and not consent_given(context):
             return SkillResponse(
                 content="Mass notification requires approval. Please confirm to proceed.",
@@ -414,6 +416,10 @@ class VolunteerCoordinatorChip(BaseSkillChip):
                 },
             )
 
+        if volunteer_ids == "all":
+            # "all" means every volunteer in this org; it used to be iterated as the letters "a", "l", "l"
+            volunteer_ids = [v.id for v in await self._get_all_volunteers(context.org_id)]
+
         # Send notifications
         result = await self.send_reminder(
             volunteer_ids=volunteer_ids,
@@ -422,11 +428,36 @@ class VolunteerCoordinatorChip(BaseSkillChip):
             notification_type=notification_type,
         )
 
+        if result["sent"]:
+            self._notified.setdefault(self._sender(context), []).append(
+                (datetime.now(timezone.utc).isoformat(), result["sent"]))
+
         return SkillResponse(
             content=f"Sent {result['sent']} notifications ({result['failed']} failed).",
             success=result["sent"] > 0,
             data=result,
         )
+
+    @staticmethod
+    def _sender(context: SkillContext) -> str:
+        """Who is sending, as a person when their key names one: one person's two keys share one limit."""
+        from kintsugi.security.api_keys import person_of
+        return person_of(context.user_id)
+
+    def _sent_recently(self, requester: str) -> int:
+        """How many volunteers this requester notified in the last MASS_WINDOW_HOURS, in this org."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=self.MASS_WINDOW_HOURS)
+        recent = [(t, n) for t, n in self._notified.get(requester, []) if datetime.fromisoformat(t) >= cutoff]
+        self._notified[requester] = recent
+        return sum(n for _, n in recent)
+
+    def _asks_mass(self, request: SkillRequest, context: SkillContext) -> bool:
+        """A notice is mass when it goes to "all", to more than MASS_LIMIT people, or would take this requester past
+        MASS_LIMIT within the window: batches of ten add up."""
+        ids = request.entities.get("volunteer_ids", [])
+        if ids == "all":
+            return True
+        return len(ids) > self.MASS_LIMIT or self._sent_recently(self._sender(context)) + len(ids) > self.MASS_LIMIT
 
     async def _handle_hours(
         self, request: SkillRequest, context: SkillContext

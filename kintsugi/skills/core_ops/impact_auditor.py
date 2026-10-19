@@ -198,6 +198,7 @@ class ImpactAuditorChip(BaseSkillChip):
     consensus_intents = {"impact_report": "submit_to_funder"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"submit_to_funder": "EXTERNAL_COMMS"}
+    consensus_no_step = {"submit_to_funder": "nothing sends a report to a funder"}
     consensus_when = {
         "impact_report": lambda r: r.entities.get("report_type") == "funder" and bool(r.entities.get("submit")),
     }

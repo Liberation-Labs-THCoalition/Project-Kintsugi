@@ -222,6 +222,7 @@ class MutualAidCoordinatorChip(BaseSkillChip):
     consensus_intents = {"match_request": "share_requester_info"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"share_requester_info": "PII"}
+    consensus_no_step = {"share_requester_info": "nothing shares contact details yet"}
     consensus_when = {
         "match_request": lambda r: bool(r.entities.get("confirm_match_id")),
     }

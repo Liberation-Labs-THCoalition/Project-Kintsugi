@@ -11,6 +11,7 @@ import ast
 import importlib
 import inspect
 import pkgutil
+import re
 
 import pytest
 
@@ -33,6 +34,8 @@ def _shipped_chips():
 
 
 CHIPS = _shipped_chips()
+REASON = re.compile(r"^(no intent (performs|publishes|sends)|advisory: (?P<intent>\w+) returns|shell-capable chips "
+                    r"are refused)")
 MAPPED = [(cls, intent, action) for cls in CHIPS for intent, action in sorted(cls.consensus_intents.items())]
 
 
@@ -44,18 +47,37 @@ def test_the_walk_finds_the_chips():
 def test_every_declared_action_is_mapped_from_an_intent_or_explained(cls):
     mapped = set(cls.consensus_intents.values())
     assert mapped <= set(cls.consensus_actions), f"mapped but not declared: {mapped - set(cls.consensus_actions)}"
-    assert all(str(why).strip() for why in cls.consensus_unreachable.values())
+    # A reason in a known shape, not any string (Vera, 10-18 follow-ons): an advisory reason names a real intent.
+    src = inspect.getsource(inspect.getmodule(cls))
+    for action, why in cls.consensus_unreachable.items():
+        m = REASON.match(str(why))
+        assert m, f"{action}: {why!r} isn't a recognised reason"
+        if m.group("intent"):
+            assert f'"{m.group("intent")}"' in src, f"{action}: advisory names {m.group('intent')}, which isn't an intent"
     assert not set(cls.consensus_unreachable) & mapped, "an action can't be both mapped and unreachable"
     missing = set(cls.consensus_actions) - mapped - set(cls.consensus_unreachable)
     assert not missing, f"declared, and no intent reaches it, and no reason given: {sorted(missing)}"
 
 
+def _values(expr) -> set:
+    """The strings an expression can evaluate to: a constant, either branch of `a if cond else b`, any operand of
+    `a or b`. The condition itself isn't a value."""
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return {expr.value}
+    if isinstance(expr, ast.IfExp):
+        return _values(expr.body) | _values(expr.orelse)
+    if isinstance(expr, ast.BoolOp):
+        return set().union(*(_values(v) for v in expr.values))
+    return set()
+
+
 @pytest.mark.parametrize("cls", CHIPS, ids=lambda c: c.__name__)
 def test_every_action_a_chip_raises_is_declared(cls):
     tree = ast.parse(inspect.getsource(inspect.getmodule(cls)))
-    raised = {kw.value.value for node in ast.walk(tree) if isinstance(node, ast.Call)
-              for kw in node.keywords if kw.arg == "consensus_action" and isinstance(kw.value, ast.Constant)
-              and isinstance(kw.value.value, str)}
+    # Every string anywhere in a consensus_action= expression, so `"x" if cond else None` counts too (Vera: the
+    # constant-only walk missed 13 of 26 conditional raise sites).
+    raised = {name for node in ast.walk(tree) if isinstance(node, ast.Call)
+              for kw in node.keywords if kw.arg == "consensus_action" for name in _values(kw.value)}
     owners = {c for c in CHIPS if c.__module__ == cls.__module__}
     declared = set().union(*(set(c.consensus_actions) for c in owners))
     assert raised <= declared, f"raised but not declared: {sorted(raised - declared)}"
@@ -135,3 +157,74 @@ async def test_a_conditional_intent_that_doesnt_ask_runs_as_before(key):
     r = await cls().handle(SkillRequest(intent=key[1], raw_input="test", entities=dict(DOESNT_ASK.get(key, {}))),
                            SkillContext(org_id="org_maps", user_id="u"))
     assert not r.metadata.get("held")
+
+
+
+def test_the_no_step_list_is_what_the_chips_declare():
+    declared = {(cls.__name__, intent) for cls, intent, action in MAPPED if action in cls.consensus_no_step}
+    assert declared == NO_STEP
+
+
+async def _a_real_match():
+    """A need, an offer and the match between them, so confirming reaches the chip's own step."""
+    from kintsugi.skills.community_aid.mutual_aid_coordinator import MutualAidCoordinatorChip
+    chip = MutualAidCoordinatorChip()
+    c = SkillContext(org_id="org_maps", user_id="key:k-asker")
+    need = await chip.handle(SkillRequest(intent="need_post", raw_input="n", entities={
+        "category": "food", "description": "Groceries", "location": "Arcata"}), c)
+    await chip.handle(SkillRequest(intent="offer_post", raw_input="o", entities={
+        "categories": ["food"], "description": "Can bring groceries", "location": "Arcata"}), c)
+    found = await chip.handle(SkillRequest(intent="match_request", raw_input="m",
+                                           entities={"need_id": need.data["need_id"]}), c)
+    return chip, found.data["matches"][0]["id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls,intent,action", MAPPED, ids=lambda v: getattr(v, "__name__", v))
+async def test_approval_asks_again_exactly_where_the_chip_says_it_has_no_step(cls, intent, action):
+    entities = dict(ASKS.get((cls.__name__, intent), {}))
+    chip = cls()
+    if (cls.__name__, intent) == ("MutualAidCoordinatorChip", "match_request"):
+        chip, entities["confirm_match_id"] = await _a_real_match()
+    if (cls.__name__, intent) == ("StaffOnboardingChip", "onboard_complete"):
+        entities["force_complete"] = True
+    ctx = SkillContext(org_id="org_maps", user_id="key:k-asker")
+    held = await chip.handle(SkillRequest(intent=intent, raw_input="t", entities=entities), ctx)
+    gate = get_consensus_gate()
+    if gate.approve(held.data["consent_id"], "key:k-a1", org_id="org_maps").status.value == "PENDING":
+        gate.approve(held.data["consent_id"], "key:k-a2", org_id="org_maps")
+    result = await consumer.execute_approved(held.data["consent_id"], "org_maps", _Registry(chip))
+    assert ("no step that carries out" in result["content"]) == (action in cls.consensus_no_step), result
+
+
+# Each predicate at its edge: the request just short of asking, and the one that asks (Vera: nothing pinned these).
+BOUNDARIES = [
+    ("FoodAccessChip", "food_donate", {"quantity": 100}, {"quantity": 101}),
+    ("SolidarityEconomyChip", "time_bank", {"action": "exchange", "hours": 5}, {"action": "exchange", "hours": 6}),
+    ("SolidarityEconomyChip", "time_bank", {"action": "balance", "hours": 9}, {"action": "exchange", "hours": 9}),
+    ("VolunteerCoordinatorChip", "volunteer_notify", {"volunteer_ids": ["vol_001"] * 10, "message": "m"},
+     {"volunteer_ids": ["vol_001"] * 11, "message": "m"}),
+    ("CrisisResponseChip", "crisis_alert", {"severity": "high"}, {"severity": "critical"}),
+    ("FinanceAssistantChip", "invoice_create", {"client_name": "Co-op"}, {"client_name": "Co-op", "amount": 1}),
+    ("ResourceRedistributionChip", "partner_connect", {"action": "list", "is_mou": True},
+     {"action": "add", "partner_name": "P", "is_mou": True}),
+    ("ImpactAuditorChip", "impact_report", {"report_type": "funder"}, {"report_type": "funder", "submit": True}),
+    ("MemberServicesChip", "membership_renew", {"tier": "no-such-tier"}, {"tier": "gold"}),
+    ("MemberServicesChip", "member_communicate", {"bulk": False}, {"bulk": True}),
+    ("CoalitionBuilderChip", "campaign_coordinate", {"is_launch": False}, {"is_launch": True}),
+    ("CommunityAssetMapperChip", "asset_map", {"share_publicly": False}, {"share_publicly": True}),
+    ("KnowYourRightsChip", "legal_clinic", {"action": "find"}, {"action": "schedule"}),
+    ("MutualAidCoordinatorChip", "match_request", {"need_id": "n-1"}, {"confirm_match_id": "m-1"}),
+    ("MutualAidEnhancedChip", "match_request", {"need_id": "n-1"}, {"need_id": "n-1", "offer_id": "o-1"}),
+    ("BoardLiaisonChip", "resolution_track", {"action": "list"}, {"action": "create"}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,intent,short,asks", BOUNDARIES, ids=lambda v: v if isinstance(v, str) else "")
+async def test_each_predicate_holds_from_its_edge_and_not_before(name, intent, short, asks):
+    cls = next(c for c in CHIPS if c.__name__ == name)
+    c = SkillContext(org_id="org_edges", user_id="key:k-edge")
+    below = await cls().handle(SkillRequest(intent=intent, raw_input="t", entities=dict(short)), c)
+    at = await cls().handle(SkillRequest(intent=intent, raw_input="t", entities=dict(asks)), c)
+    assert not below.metadata.get("held") and at.metadata.get("held")

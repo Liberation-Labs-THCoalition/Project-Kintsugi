@@ -23,4 +23,3 @@ safety:
   oracle_mode: observe
   max_actions_per_turn: 5
   block_threshold: 0.8
-  consensus_actions: []

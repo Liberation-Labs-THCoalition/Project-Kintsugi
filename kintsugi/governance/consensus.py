@@ -26,6 +26,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Iterator, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -53,6 +57,10 @@ class ConsentStatus(str, Enum):
     EXPIRED = "EXPIRED"
     ESCALATED = "ESCALATED"
     EXECUTED = "EXECUTED"       # approved and run; an item runs once
+    FAILED = "FAILED"           # approved, ran, and raised: nothing done; one retry is allowed
+
+
+MAX_RUN_ATTEMPTS = 2            # the first run and one retry (Vera, 10-18 follow-ons: a failed replay was final)
 
 
 # ---------------------------------------------------------------------------
@@ -81,21 +89,29 @@ class ConsentItem:
     rationale: Optional[str] = None
     timeout_hours: float = 24.0
     requester: str = ""
+    requester_person: str = ""          # who asked, as a person when their key names one (person_of)
     payload_digest: str = ""
     executed_at: Optional[datetime] = None
     result: Optional[dict] = None
+    attempts: int = 0
     _approvals: list = field(default_factory=list, repr=False)
 
-    def to_dict(self) -> dict:
+    def to_dict(self, include_payload: bool = True) -> dict:
+        """The item as JSON. Without include_payload, what was asked and what came back are left out: a held
+        share_requester_info carries the private info itself, so only admins and the asker see it (Vera, 10-18)."""
+        payload = self.action_payload if include_payload else {
+            k: self.action_payload.get(k) for k in ("chip", "action", "intent")}
         return {"id": self.id, "org_id": self.org_id, "category": self.category.value,
                 "priority": self.priority.value, "description": self.description,
-                "action_payload": self.action_payload, "status": self.status.value,
+                "action_payload": payload, "payload_shown": include_payload, "status": self.status.value,
                 "created_at": self.created_at.isoformat(),
                 "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
                 "resolved_by": self.resolved_by, "rationale": self.rationale, "timeout_hours": self.timeout_hours,
-                "requester": self.requester, "payload_digest": self.payload_digest,
+                "requester": self.requester, "requester_person": self.requester_person,
+                "payload_digest": self.payload_digest,
                 "executed_at": self.executed_at.isoformat() if self.executed_at else None,
-                "result": self.result, "approvals": list(self._approvals)}
+                "result": self.result if include_payload else None, "attempts": self.attempts,
+                "approvals": list(self._approvals)}
 
     @classmethod
     def from_dict(cls, d: dict) -> "ConsentItem":
@@ -107,8 +123,10 @@ class ConsentItem:
                    created_at=when(d["created_at"]), resolved_at=when(d.get("resolved_at")),
                    resolved_by=d.get("resolved_by"), rationale=d.get("rationale"),
                    timeout_hours=d.get("timeout_hours", 24.0), requester=d.get("requester", ""),
+                   requester_person=d.get("requester_person", ""),
                    payload_digest=d.get("payload_digest", ""), executed_at=when(d.get("executed_at")),
-                   result=d.get("result"), _approvals=list(d.get("approvals", [])))
+                   result=d.get("result"), attempts=d.get("attempts", 0),
+                   _approvals=list(d.get("approvals", [])))
 
 
 @dataclass
@@ -139,6 +157,7 @@ _TERMINAL_STATUSES = frozenset({
     ConsentStatus.REJECTED,
     ConsentStatus.EXPIRED,
     ConsentStatus.EXECUTED,
+    ConsentStatus.FAILED,
 })
 _OPEN = (ConsentStatus.PENDING, ConsentStatus.ESCALATED)
 
@@ -149,6 +168,7 @@ class ConsensusGate:
     def __init__(self, config: ConsensusConfig | None = None, path: str | os.PathLike | None = None) -> None:
         self._config = config or ConsensusConfig()
         self._items: Dict[str, ConsentItem] = {}
+        self._bad_rows: list = []
         self._path = Path(os.path.expanduser(str(path))) if path else None
         self._mutex = threading.RLock()
 
@@ -167,14 +187,32 @@ class ConsensusGate:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 try:
                     raw = self._path.read_text() if self._path.exists() else "[]"
-                    self._items = {d["id"]: ConsentItem.from_dict(d) for d in json.loads(raw or "[]")}
+                    # One damaged row is kept as it is and reported, never allowed to take the gate down for every
+                    # org (Vera, 10-18 follow-ons). A file that isn't JSON at all still refuses: nothing can be known.
+                    self._items, self._bad_rows = {}, []
+                    for d in json.loads(raw or "[]"):
+                        try:
+                            item = ConsentItem.from_dict(d)
+                            self._items[item.id] = item
+                        except Exception:
+                            self._bad_rows.append(d)
+                    if self._bad_rows:
+                        logger.warning("consent file %s: %d unreadable row(s) kept aside", self._path,
+                                       len(self._bad_rows))
                     yield
                     if write:
                         tmp = self._path.with_name(self._path.name + ".tmp")
                         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                         with os.fdopen(fd, "w") as fh:
-                            json.dump([i.to_dict() for i in self._items.values()], fh, indent=1)
+                            json.dump([i.to_dict() for i in self._items.values()] + self._bad_rows, fh, indent=1)
+                            fh.flush()
+                            os.fsync(fh.fileno())                  # the bytes are on disk before the rename
                         os.replace(tmp, self._path)
+                        dfd = os.open(self._path.parent, os.O_RDONLY)
+                        try:
+                            os.fsync(dfd)                           # and so is the rename
+                        finally:
+                            os.close(dfd)
                 finally:
                     fcntl.flock(lock, fcntl.LOCK_UN)
 
@@ -188,6 +226,7 @@ class ConsensusGate:
         action_payload: dict,
         priority: ConsensusPriority = ConsensusPriority.MEDIUM,
         requester: str = "",
+        requester_person: str = "",
     ) -> ConsentItem:
         """Create a new pending consent item and return it."""
         if not org_id:
@@ -201,23 +240,28 @@ class ConsensusGate:
             action_payload=action_payload,
             timeout_hours=self._config.default_timeout_hours,
             requester=requester,
+            requester_person=requester_person or requester,
             payload_digest=payload_digest(action_payload),
         )
         with self._txn():
             self._items[item.id] = item
         return item
 
-    def approve(self, item_id: str, approver: str, rationale: str = "", *, org_id: str) -> ConsentItem:
-        """Record an approval from someone in the item's org. Transitions to APPROVED once threshold is met."""
+    def approve(self, item_id: str, approver: str, rationale: str = "", *, org_id: str,
+                approver_person: str = "") -> ConsentItem:
+        """Record an approval from someone in the item's org. Transitions to APPROVED once threshold is met. People
+        are counted, not keys: approver_person (person_of) makes one person's two keys one approver, and keeps the
+        asker's other key from approving their own request (Vera, 10-18 follow-ons)."""
+        person = approver_person or approver
         with self._txn():
             item = self._get_or_raise(item_id, org_id)
             self._expire_if_due(item)
             self._assert_actionable(item, "approve")
-            if item.requester and approver == item.requester:
+            if item.requester and (approver == item.requester or person == (item.requester_person or item.requester)):
                 raise ValueError("the person who asked for an action can't approve it")
 
-            if approver not in item._approvals:   # an approver counts once, however often they approve
-                item._approvals.append(approver)
+            if person not in item._approvals:     # a person counts once, however often, with however many keys
+                item._approvals.append(person)
             threshold = self._config.approval_thresholds.get(item.category, 1)
             if len(item._approvals) >= threshold:
                 item.status = ConsentStatus.APPROVED
@@ -232,7 +276,7 @@ class ConsensusGate:
         with self._txn():
             item = self._get_or_raise(item_id, org_id)
             self._expire_if_due(item)
-            if item.status != ConsentStatus.APPROVED:
+            if item.status not in (ConsentStatus.APPROVED, ConsentStatus.FAILED):
                 self._assert_actionable(item, "reject")
 
             item.status = ConsentStatus.REJECTED
@@ -247,8 +291,10 @@ class ConsensusGate:
         stale = None
         with self._txn():
             item = self._get_or_raise(item_id, org_id)
-            if item.status != ConsentStatus.APPROVED:
-                raise ValueError(f"item {item_id} is {item.status.value}, not approved; it can't run")
+            retry = item.status == ConsentStatus.FAILED and item.attempts < MAX_RUN_ATTEMPTS
+            if item.status != ConsentStatus.APPROVED and not retry:
+                why = "its one retry is used" if item.status == ConsentStatus.FAILED else "not approved"
+                raise ValueError(f"item {item_id} is {item.status.value}, {why}; it can't run")
             if item.payload_digest != payload_digest(item.action_payload):
                 raise ValueError(f"item {item_id} was changed after it was asked for; it can't run")
             now = datetime.now(timezone.utc)
@@ -260,6 +306,7 @@ class ConsensusGate:
             else:
                 item.status = ConsentStatus.EXECUTED
                 item.executed_at = now
+                item.attempts += 1
                 return item
         raise ValueError(f"item {item_id} {stale.rationale}")
 
@@ -268,10 +315,13 @@ class ConsensusGate:
         with self._txn(write=False):
             return [i for i in self._items.values() if i.status == ConsentStatus.APPROVED]
 
-    def record_result(self, item_id: str, result: dict, *, org_id: str) -> ConsentItem:
+    def record_result(self, item_id: str, result: dict, *, org_id: str, failed: bool = False) -> ConsentItem:
+        """Keep what the run said. A run that raised (nothing done) is FAILED, and may be retried once."""
         with self._txn():
             item = self._get_or_raise(item_id, org_id)
             item.result = result
+            if failed:
+                item.status = ConsentStatus.FAILED
             return item
 
     def list_pending(self, org_id: str) -> list[ConsentItem]:

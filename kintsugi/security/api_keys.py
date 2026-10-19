@@ -40,6 +40,8 @@ class KeyRecord:
     key_hash: str        # SHA-256 hex of the full key
     created_at: str
     revoked_at: str | None = None
+    # Who holds the key, when one person holds several: consent counts people, not keys (Vera, 10-18 follow-ons).
+    person: str = ""
 
 
 def _hash(key: str) -> str:
@@ -87,7 +89,7 @@ class KeyStore:
         self._cache = None
 
     # --- operations ---
-    def create(self, org_id: str, role: str, label: str = "") -> tuple[KeyRecord, str]:
+    def create(self, org_id: str, role: str, label: str = "", person: str = "") -> tuple[KeyRecord, str]:
         """Mint a key. Returns (record, plaintext); the plaintext is never stored and cannot be recovered."""
         if role not in ROLES:
             raise ValueError(f"role must be one of {ROLES}")
@@ -95,7 +97,8 @@ class KeyStore:
             raise ValueError("org_id is required")
         plaintext = PREFIX + secrets.token_urlsafe(32)
         rec = KeyRecord(id=uuid.uuid4().hex[:12], org_id=str(org_id), role=role, label=label,
-                        prefix=plaintext[len(PREFIX):len(PREFIX) + 6], key_hash=_hash(plaintext), created_at=_now())
+                        prefix=plaintext[len(PREFIX):len(PREFIX) + 6], key_hash=_hash(plaintext), created_at=_now(),
+                        person=person)
         with self._locked():
             records = list(self._read())
             records.append(rec)
@@ -126,8 +129,34 @@ class KeyStore:
                 self._write(records)
         return hit
 
+    def set_person(self, key_id: str, person: str) -> bool:
+        """Record who holds a key. Returns False if there's no such key."""
+        with self._locked():
+            records = list(self._read())
+            hit = False
+            for rec in records:
+                if rec.id == key_id:
+                    rec.person = person
+                    hit = True
+            if hit:
+                self._write(records)
+        return hit
+
+    def get(self, key_id: str) -> KeyRecord | None:
+        return next((r for r in self._read() if r.id == key_id), None)
+
     def list(self) -> list[KeyRecord]:
         return list(self._read())
+
+
+def person_of(identity: str) -> str:
+    """The person behind an acting identity: "key:<id>" becomes "person:<name>" when that key names its holder, so
+    two keys of one person count as one for consent. Anything else, or a key with no person, stays as it is."""
+    if isinstance(identity, str) and identity.startswith("key:"):
+        rec = get_key_store().get(identity[len("key:"):])
+        if rec is not None and rec.person:
+            return f"person:{rec.person}"
+    return identity
 
 
 _store: KeyStore | None = None

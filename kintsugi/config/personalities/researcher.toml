@@ -19,4 +19,3 @@ deny = ["bash_executor"]
 oracle_mode = "observe"
 max_actions_per_turn = 8
 block_threshold = 0.8
-consensus_actions = []

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from kintsugi.api.auth import Principal, audit, require_principal
 from kintsugi.governance.consensus import ConsentStatus, get_consensus_gate
 from kintsugi.governance.consumer import execute_approved
+from kintsugi.security.api_keys import person_of
 
 router = APIRouter(prefix="/api/v1/consensus", tags=["consensus"])
 
@@ -24,9 +25,15 @@ def _who(principal: Principal) -> str:
     return f"key:{principal.key_id}"       # the same form the routes give chips as the acting user
 
 
+def _view(item, principal: Principal) -> dict:
+    """What a key may see of an item: everything for an admin or the asker; for anyone else in the org, what was asked
+    for and its status, but not the payload or the result, which can hold a person's private details (Vera, 10-18)."""
+    return item.to_dict(include_payload=principal.is_admin or item.requester == _who(principal))
+
+
 @router.get("/pending")
 async def pending(principal: Principal = Depends(require_principal)) -> dict:
-    return {"pending": [i.to_dict() for i in get_consensus_gate().list_pending(principal.org_id)]}
+    return {"pending": [_view(i, principal) for i in get_consensus_gate().list_pending(principal.org_id)]}
 
 
 @router.get("/{item_id}")
@@ -34,7 +41,7 @@ async def get_item(item_id: str, principal: Principal = Depends(require_principa
     item = get_consensus_gate().get_item(item_id, org_id=principal.org_id)
     if item is None:
         raise HTTPException(status_code=404, detail=f"unknown consent item {item_id!r}")
-    return item.to_dict()
+    return _view(item, principal)
 
 
 @router.post("/{item_id}/approve")
@@ -48,7 +55,8 @@ async def approve(item_id: str, body: Decision, principal: Principal = Depends(r
     # an approval can't exist without its record (Vera's review, 2026-10-18, item 1).
     audit(principal, "consensus.approve", item=item_id)
     try:
-        item = gate.approve(item_id, _who(principal), body.rationale, org_id=principal.org_id)
+        item = gate.approve(item_id, _who(principal), body.rationale, org_id=principal.org_id,
+                            approver_person=person_of(_who(principal)))
     except ValueError as exc:
         raise HTTPException(status_code=404 if "No consent item" in str(exc) else 409, detail=str(exc))
     out = {"item": item.to_dict(), "result": None}
@@ -88,4 +96,4 @@ async def reject(item_id: str, body: Decision, principal: Principal = Depends(re
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     audit(principal, "consensus.reject", item=item_id)
-    return {"item": item.to_dict()}
+    return {"item": _view(item, principal)}

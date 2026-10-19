@@ -121,6 +121,7 @@ class MemberServicesChip(BaseSkillChip):
     consensus_intents = {"member_communicate": "bulk_communication", "membership_renew": "change_membership_tier"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"bulk_communication": "EXTERNAL_COMMS", "change_membership_tier": "FINANCIAL"}
+    consensus_no_step = {"bulk_communication": "nothing sends member messages"}
     consensus_when = {
         "member_communicate": lambda r: bool(r.entities.get("bulk", False)),
         # an unknown tier gets the chip's own refusal at once, not a wait for two approvers

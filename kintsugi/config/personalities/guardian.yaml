@@ -24,4 +24,3 @@ safety:
   oracle_mode: enforce
   max_actions_per_turn: 3
   block_threshold: 0.6
-  consensus_actions: ["external_send", "financial_operation"]
