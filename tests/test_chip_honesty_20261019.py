@@ -688,3 +688,27 @@ async def test_the_fallback_reads_cleanly_with_no_state():
 async def test_a_card_follows_what_the_person_typed():
     r = await _kyr_says("make me a card for when ICE comes", intent="rights_card")
     assert r.data["rights_card"]["topic"] == "immigration_rights" and "signed by a judge" in r.content
+
+
+# ---- know your rights: Vera's follow-up phrasings (10-19 09:06) ------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw, topic", [
+    ("there's ice outside, can police make me shovel my walk", "police_encounter"),     # weather ice
+    ("the ice is coming down hard and cops are blocking the road", "police_encounter"),
+    ("la policía me detuvo", "police_encounter"),                                       # Spanish police words
+    ("the police are at my door with a warrant", "police_encounter"),                   # the police are named
+    ("ICE en mi puerta", "immigration_rights"),
+])
+async def test_vera_followup_phrasings_reach_the_right_rights(raw, topic):
+    r = await _kyr_says(raw)
+    assert r.data["topic"] == topic
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intent", ["rights_lookup", "rights_card"])
+async def test_a_warrant_at_the_door_with_no_agency_named_asks_and_shows_the_difference(intent):
+    r = await _kyr_says("officers are at my door with a warrant", intent=intent)
+    assert r.data["topic"] == "warrant_unclear" and r.data["rights_info"] is None
+    assert "Is it ICE (immigration) or the police?" in r.content and "signed by a judge" in r.content
+    assert "slide the warrant under the door" in r.content
