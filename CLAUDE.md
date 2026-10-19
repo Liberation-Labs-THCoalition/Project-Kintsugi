@@ -17,7 +17,7 @@ Designed by CC (Coalition Code); spec co-authored by Thomas E. Synthesized from 
 - **Edit Budget** (v2): SkillOpt-inspired mutation cost bounds. Each proposal's magnitude is measured; proposals exceeding the budget are rejected before evaluation. Prevents runaway self-modification.
 - **Rejected-Edit Buffer** (v2): Preserves useful signal from failed modification proposals. Future proposals can draw from previously rejected rules that showed partial improvement.
 - **Drift Detection**: Continuous monitoring compares behavior against ethical baseline. Auto-corrects toward core values. BDI-grounded classification: healthy adaptation vs stale vs drift.
-- **Skill Chips**: 22 modular domain-specific handlers with built-in ethical guardrails. Each declares a domain, EFE weights, capabilities, and required integration spans. v2: skills support Program Functions — proactive state-action interventions with activation conditions, cooldowns, and priority ordering. Skills can now detect failure-prone states and modify the next action automatically.
+- **Skill Chips**: 25 modular domain-specific handlers with built-in ethical guardrails. Most run on sample data until connected and say so (Sample mode, `kintsugi/skills/honesty.py`); a chip may never claim an action it didn't take or present invented records as real. Each declares a domain, EFE weights, capabilities, and required integration spans. v2: skills support Program Functions — proactive state-action interventions with activation conditions, cooldowns, and priority ordering. Skills can now detect failure-prone states and modify the next action automatically.
 - **Consensus Gate**: Major changes require multi-stakeholder approval. The agent cannot unilaterally modify its own ethics.
 - **Shield Module**: Hard constraints (PII protection, never share externally, etc.) that self-modification cannot override.
 
@@ -42,7 +42,7 @@ kintsugi/
   kintsugi_engine/ Shadow fork, staged pipeline, verifier, promoter, evolution (v2), drift detection
   bdi/             Beliefs/Desires/Intentions models, store, coherence
   governance/      Consensus gate, OpenTelemetry, compliance
-  skills/          22 skill chips across 3 subdirectories:
+  skills/          25 skill chips across 3 subdirectories (honesty.py: what a chip may say):
     core_ops/        Grant Hunter, Finance Assistant, Content Drafter,
                      Impact Auditor, Institutional Memory, Volunteer Coordinator
     programs_people/ Donor Stewardship, Event Planner, Board Liaison,
@@ -71,7 +71,7 @@ cd /home/asdf/project-kintsugi && .venv/bin/pytest tests/ -x
 
 ## Current Status
 
-All 5 development phases complete. ~77,000 lines of Python, 600+ tests, 22 skill chips operational. FastAPI backend with multi-platform integration (Slack, Discord, WebChat, Email). v2.0 upgrade in progress: SkillOpt evolution pattern and staged deployment pipeline integrated (May 2026).
+All 5 development phases complete. ~77,000 lines of Python, 2,800+ tests, 25 skill chips. Most chips run on sample data until connected to an organization's systems (2026-10-19 audit); the community-aid safety chips and the bash executor are honest without integrations. FastAPI backend with multi-platform integration (Slack, Discord, WebChat, Email). v2.0 upgrade in progress: SkillOpt evolution pattern and staged deployment pipeline integrated (May 2026).
 
 ## Coalition Ethics (Mandatory)
 
