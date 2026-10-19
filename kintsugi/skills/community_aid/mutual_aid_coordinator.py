@@ -103,6 +103,7 @@ class AidNeed:
     status: AidStatus
     matched_offer_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    cancelled_by: str | None = None  # "author" or "admin": who may reopen it
 
 
 @dataclass
@@ -121,6 +122,7 @@ class AidOffer:
     status: AidStatus
     active_matches: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    cancelled_by: str | None = None  # "author" or "admin": who may reopen it
 
 
 @dataclass
@@ -146,18 +148,41 @@ def _may_change(owner_id: str, context: SkillContext, hashed: bool = False) -> b
 _SETTLED = frozenset({AidStatus.FULFILLED, AidStatus.CANCELLED, AidStatus.EXPIRED})
 
 
-def _next_status(current: AidStatus, new_status: str, context: SkillContext) -> "tuple[AidStatus | None, str]":
+def _is_author(owner_id: str, context: SkillContext, hashed: bool = False) -> bool:
+    """The record's own author, whatever their role."""
+    from hashlib import sha256
+    me = sha256(context.user_id.encode()).hexdigest()[:16] if hashed else context.user_id
+    return bool(owner_id) and me == owner_id
+
+
+def _next_status(record, new_status: str, context: SkillContext, *, is_author: bool) -> "tuple[AidStatus | None, str]":
     """The status to move to, or None and why not. Once a record is fulfilled, cancelled or expired it's settled: only
     an org admin may change it after that (Vera, 2026-10-18 LOW: an author turned a need an admin had cancelled into
-    "fulfilled"). An unknown status is refused in words rather than raised."""
+    "fulfilled"). One exception, also Vera's: an author may reopen what they cancelled themselves, since the person who
+    asked for help shouldn't need an admin to undo their own change of mind; a cancellation by an admin, which may be
+    moderation, stays an admin's to reverse. An unknown status is refused in words rather than raised."""
+    current = record.status
     try:
         new = AidStatus(new_status)
     except ValueError:
         return None, (f"Unknown status {new_status!r}; use one of: "
                       + ", ".join(s.value for s in AidStatus) + ".")
-    if current in _SETTLED and new != current and (context.metadata or {}).get("role") != "admin":
+    own_cancellation = current == AidStatus.CANCELLED and record.cancelled_by == "author" and is_author
+    if (current in _SETTLED and new != current and (context.metadata or {}).get("role") != "admin"
+            and not own_cancellation):
+        if current == AidStatus.CANCELLED and record.cancelled_by == "admin":
+            return None, "An admin cancelled this; only an admin can reopen it."
         return None, f"This is already {current.value}; only an admin can change it now."
     return new, ""
+
+
+def _set_status(record, new: AidStatus, is_author: bool) -> None:
+    """Move to the new status, remembering who cancelled it, so the right person can reopen it."""
+    if new == AidStatus.CANCELLED and record.status != AidStatus.CANCELLED:
+        record.cancelled_by = "author" if is_author else "admin"
+    elif new != AidStatus.CANCELLED:
+        record.cancelled_by = None
+    record.status = new
 
 
 class MutualAidCoordinatorChip(BaseSkillChip):
@@ -711,10 +736,11 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             if not _may_change(need.requester_id, context, hashed=True):
                 return SkillResponse(content="Only the person who posted this need, or an admin, can change it.",
                                      success=False)
-            new, why = _next_status(need.status, new_status, context)
+            author = _is_author(need.requester_id, context, hashed=True)
+            new, why = _next_status(need, new_status, context, is_author=author)
             if new is None:
                 return SkillResponse(content=why, success=False)
-            need.status = new
+            _set_status(need, new, author)
             return SkillResponse(
                 content=f"Need status updated to {new_status}.",
                 success=True,
@@ -739,10 +765,11 @@ class MutualAidCoordinatorChip(BaseSkillChip):
             if not _may_change(offer.offerer_id, context):
                 return SkillResponse(content="Only the person who made this offer, or an admin, can change it.",
                                      success=False)
-            new, why = _next_status(offer.status, new_status, context)
+            author = _is_author(offer.offerer_id, context)
+            new, why = _next_status(offer, new_status, context, is_author=author)
             if new is None:
                 return SkillResponse(content=why, success=False)
-            offer.status = new
+            _set_status(offer, new, author)
             return SkillResponse(
                 content=f"Offer status updated to {new_status}.",
                 success=True,
