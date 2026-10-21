@@ -14,6 +14,8 @@ def _isolated_auth_files(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "API_KEYS_FILE", str(tmp_path / "api_keys.json"))
     monkeypatch.setattr(settings, "AUDIT_LOG_FILE", str(tmp_path / "audit.jsonl"))
     monkeypatch.setattr(settings, "CONSENT_FILE", str(tmp_path / "consent.json"))
+    monkeypatch.setattr(settings, "ONCALL_FILE", str(tmp_path / "oncall.json"))
+    monkeypatch.setattr(settings, "ONCALL_ALERTS_FILE", str(tmp_path / "oncall_alerts.json"))
     monkeypatch.setattr(settings, "KINTSUGI_AUTH_DISABLED", False)
 
 

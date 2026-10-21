@@ -297,7 +297,10 @@ async def test_a_raid_alert_notifies_nobody_until_approved():
     chip = RapidResponseChip()
     held = await chip.handle(SkillRequest(intent="raid_alert", raw_input="raid", entities={
         "general_area": "Downtown"}), ctx())
-    assert "nobody has been alerted" not in held.content and held.metadata.get("held")
+    # The hold, not the chip's step (its heading is absent). Since 10-20 the hold itself says who has the alert:
+    # with no on-call roster, nobody (kintsugi/governance/oncall.py).
+    assert "Raid report: nobody has been alerted" not in held.content and held.metadata.get("held")
+    assert held.data["oncall"]["state"] == "held" and "No on-call people are named" in held.content
     result = await _approve_and_run(chip, held)
     # The approved run is the chip's own step; with no alert network connected, it says nobody was alerted.
     assert "nobody has been alerted" in result["content"] and result["data"]["sent"] is False

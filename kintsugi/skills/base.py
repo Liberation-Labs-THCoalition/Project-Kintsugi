@@ -565,6 +565,10 @@ class BaseSkillChip(ABC):
     # message vs its launch). It mirrors the chip's own condition, and is decided before the chip runs. A method name
     # instead of a function is called as self.method(request, context).
     consensus_when: dict = {}
+    # Optional: held action -> on-call alert kind. When such an action is held, the deployment's on-call people get
+    # the alert at once and only the wide broadcast waits for an admin (kintsugi/governance/oncall.py; Thomas,
+    # 2026-10-19). The chip says what they're told in oncall_message(), never its free text.
+    consensus_oncall: dict[str, str] = {}
 
     # Honesty (kintsugi/skills/honesty.py). A chip runs on sample data until it is connected to the organization's own
     # systems, and every response says so: the wrapper marks it before anyone reads it. A chip sets simulated = False
@@ -610,7 +614,7 @@ class BaseSkillChip(ABC):
                     if not (consumer.is_token(done) and done.action == action and done.org_id == context.org_id):
                         token = md.get(consumer.CONSENT_TOKEN)
                         if not consumer.redeem(token, self.name, request, context, action):
-                            return consumer.hold(self, request, context, action)
+                            return await consumer.hold_and_alert(self, request, context, action)
                         context.metadata[CONSENT_REDEEMED] = token
                 return _mark_sample(self, intent, await handle(self, request, context, *args, **kw))
 

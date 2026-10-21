@@ -32,3 +32,10 @@ Attributes:
 - **Version**: 1.0.0
 - **Capabilities**: general
 - **Consensus actions**: activate_rapid_response, release_bail_funds, share_location_alert
+
+## Inputs for raid_alert
+
+- type, urgency
+- **area**: a neighbourhood or cross streets, not a home address. With on-call people named, it is sent to them at once (unless the deployment turns
+  ONCALL_SEND_AREA off), so it must never be an address.
+- description: kept with the request for the approvers; never sent to on-call.

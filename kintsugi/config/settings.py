@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     API_KEYS_FILE: str = "~/.kintsugi/api_keys.json"
     # Actions waiting for, or given, consent: kept on disk so a restart neither approves nor forgets one.
     CONSENT_FILE: str = "~/.kintsugi/consent.json"
+    # Who is on call for critical and raid alerts, and everyone's contacts, per org (kintsugi/governance/oncall.py):
+    # {"<org>": {"on_call": ["alice"], "contacts": {"alice": [{"channel": "signal", "address": "..."}]},
+    #            "ack_window_seconds": 300}}. No file, or no entry for an org, means nobody is on call.
+    ONCALL_FILE: str = "~/.kintsugi/oncall.json"
+    # On-call alerts sent, acknowledged and escalated: kept on disk so a restart can't forget an escalation.
+    ONCALL_ALERTS_FILE: str = "~/.kintsugi/oncall_alerts.json"
+    # Whether an on-call message carries the reported area. Off for a deployment whose messenger is a third party it
+    # wouldn't trust with a location (Vera, 2026-10-20).
+    ONCALL_SEND_AREA: bool = True
+    # How often the server checks for on-call alerts whose acknowledgement window has closed.
+    ONCALL_TICK_SECONDS: int = 30
     # Auth off is allowed only for local development: with it set, every request not from loopback is refused.
     KINTSUGI_AUTH_DISABLED: bool = False
     KINTSUGI_AUTH_DISABLED_ORG: str = "default"

@@ -43,6 +43,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from kintsugi.governance.oncall import general_area
 from kintsugi.skills.base import consent_given
 from kintsugi.skills.honesty import US_DANGER, not_connected
 from kintsugi.skills.base import org_scoped  # records kept per organisation
@@ -207,6 +208,8 @@ class CrisisResponseChip(BaseSkillChip):
     consensus_intents = {"crisis_alert": "activate_emergency_protocol"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"activate_emergency_protocol": "EXTERNAL_COMMS"}
+    # A critical crisis alert reaches the on-call people at once; only the wide broadcast waits (Thomas, 2026-10-19).
+    consensus_oncall = {"activate_emergency_protocol": "crisis"}
     consensus_when = {
         "crisis_alert": lambda r: r.entities.get("severity") == "critical",
     }
@@ -231,6 +234,20 @@ class CrisisResponseChip(BaseSkillChip):
             return (f"{not_connected('An alert system', 'approving this will not notify anyone')} "
                     f"Don't wait for it to start your own phone tree. {US_DANGER}")
         return ""
+
+    def oncall_message(self, action: str, request: SkillRequest) -> str:
+        """What the on-call people are told: the crisis type, severity and affected area as reported, never the
+        description, which may hold an address or a name."""
+        try:
+            kind = CrisisType(request.entities.get("crisis_type", "other")).value
+        except ValueError:
+            kind = CrisisType.OTHER.value
+        try:
+            severity = CrisisSeverity(request.entities.get("severity", "medium")).value
+        except ValueError:
+            severity = CrisisSeverity.MEDIUM.value
+        return (f"Crisis alert: {kind.replace('_', ' ')}, {severity}. Area as reported: "
+                f"{general_area(request.entities.get('location'))}.")
 
     # Simulated storage
     _incidents: dict[str, CrisisIncident] = org_scoped(dict)
@@ -277,7 +294,7 @@ class CrisisResponseChip(BaseSkillChip):
             severity: Severity level (critical, high, medium, low)
             title: Brief title for the incident
             description: Detailed description
-            location: Affected area
+            location: Affected area (a neighbourhood or cross streets, not a home address); sent to on-call for a critical alert
             affected_population: Estimated number affected
         """
         severity = CrisisSeverity(request.entities.get("severity", "medium"))

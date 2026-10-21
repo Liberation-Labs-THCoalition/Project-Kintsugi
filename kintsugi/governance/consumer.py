@@ -62,27 +62,60 @@ def _category(chip, action: str) -> ConsentCategory:
     return ConsentCategory(named) if named else ConsentCategory.GENERAL
 
 
-def hold(chip, request, context, action: str) -> SkillResponse:
-    """Submit the request to the gate instead of running it. Nothing the chip would do has happened."""
+def _submit(chip, request, context, action: str):
     payload = request_payload(chip.name, request, context, action)
     from kintsugi.security.api_keys import person_of
     item = get_consensus_gate().submit(context.org_id, _category(chip, action), f"{chip.name}: {action}", payload,
                                        requester=context.user_id, requester_person=person_of(context.user_id))
     logger.info("held %s (%s) for consent as %s", chip.name, action, item.id)
+    return item
+
+
+def _held(chip, action: str, item, lead: str) -> SkillResponse:
     no_step = (getattr(chip, "consensus_no_step", None) or {}).get(action)
     note = (f" Approving it records the decision, but this skill has no step that carries it out yet ({no_step}), "
             f"so nothing will happen automatically." if no_step else "")
     now = chip.while_held(action) if hasattr(chip, "while_held") else ""
     note += f" {now}" if now else ""
     return SkillResponse(
-        content=(f"This needs approval before it happens ({action}). Nothing has been done yet; it's waiting for "
-                 f"approval as request {item.id}.{note}"),
+        content=f"{lead}{note}",
         success=True,
         requires_consensus=True,
         consensus_action=action,
         data={"consent_id": item.id, "status": item.status.value, "action": action, "no_step": bool(no_step)},
         metadata={"held": True},
     )
+
+
+def hold(chip, request, context, action: str) -> SkillResponse:
+    """Submit the request to the gate instead of running it. Nothing the chip would do has happened."""
+    item = _submit(chip, request, context, action)
+    return _held(chip, action, item, f"This needs approval before it happens ({action}). Nothing has been done yet; "
+                                     f"it's waiting for approval as request {item.id}.")
+
+
+async def hold_and_alert(chip, request, context, action: str) -> SkillResponse:
+    """hold(), and for an action the chip names in consensus_oncall (a raid report, a critical crisis alert), send the
+    alert to whoever on call can be reached now (kintsugi/governance/oncall.py; Thomas, 2026-10-19). Only the wide
+    broadcast waits for an admin; the on-call alert is not that broadcast and approves nothing."""
+    kind = (getattr(chip, "consensus_oncall", None) or {}).get(action)
+    if not kind:
+        return hold(chip, request, context, action)
+    from kintsugi.governance import oncall
+    item = _submit(chip, request, context, action)
+    message = chip.oncall_message(action, request) if hasattr(chip, "oncall_message") else f"{chip.name}: {action}"
+    lead = (f"The wide broadcast needs an admin's approval before it goes out ({action}); it's waiting as request "
+            f"{item.id}.")
+    try:
+        rec = await oncall.dispatch(context.org_id, item.id, kind, message, triggered_by=context.user_id)
+    except Exception as exc:  # an unreadable roster holds, as before, and says so: it never passes for "sent"
+        logger.warning("on-call dispatch for %s failed: %s", item.id, type(exc).__name__)
+        response = _held(chip, action, item, f"{lead} The on-call list couldn't be read, so nobody has been alerted.")
+        response.data["oncall"] = {"state": oncall.AlertState.HELD.value, "error": type(exc).__name__}
+        return response
+    response = _held(chip, action, item, f"{lead} {oncall.status_line(rec)}")
+    response.data["oncall"] = oncall.public(rec)
+    return response
 
 
 def redeem(token, chip_name: str, request, context, action: str) -> bool:
