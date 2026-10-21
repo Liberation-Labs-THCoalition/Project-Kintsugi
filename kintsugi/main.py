@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
@@ -67,8 +68,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("consent sweep failed: %s", type(exc).__name__)
 
+    # On-call alerts whose acknowledgement window closed while the server was down are escalated now, and then
+    # checked every ONCALL_TICK_SECONDS (kintsugi/governance/oncall.py). A failed check is logged and retried next tick.
+    async def _oncall_loop() -> None:
+        from kintsugi.governance.oncall import tick
+
+        while True:
+            try:
+                escalated = await tick()
+                if escalated:
+                    logger.warning("on-call alerts escalated: %s", [r.id for r in escalated])
+            except Exception as exc:
+                logger.warning("on-call check failed: %s", type(exc).__name__)
+            await asyncio.sleep(settings.ONCALL_TICK_SECONDS)
+
+    oncall_task = asyncio.create_task(_oncall_loop())
+
     yield
 
+    oncall_task.cancel()
     if app.state.db_available:
         from kintsugi.db import engine
 
@@ -112,6 +130,7 @@ _route_modules = [
     "kintsugi.api.routes.oracle",
     "kintsugi.api.routes.events",
     "kintsugi.api.routes.consensus",
+    "kintsugi.api.routes.oncall",
 ]
 
 for _mod_path in _route_modules:

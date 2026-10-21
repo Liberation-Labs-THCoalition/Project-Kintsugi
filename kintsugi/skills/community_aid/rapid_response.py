@@ -16,7 +16,9 @@ location data is NOT logged. All communications should use encrypted
 channels when possible.
 
 Intents handled:
-- raid_alert: Report ICE or police activity (held for approval; sends through an alert network once one is connected)
+- raid_alert: Report ICE or police activity (the deployment's on-call people get it at once, if any are named and
+  reachable; the wide broadcast is held for an admin's approval, and sends through an alert network once one is
+  connected)
 - bail_request: Ask for bail fund support (held for two approvers; reaches a bail fund once one is connected)
 - legal_hotline: Give the deployment's legal hotline
 - safe_location: Point to the deployment's safe-location line (never addresses)
@@ -48,6 +50,7 @@ from kintsugi.skills import (
     SkillRequest,
     SkillResponse,
 )
+from kintsugi.governance.oncall import general_area
 from kintsugi.skills.base import consent_given
 from kintsugi.skills.honesty import NOBODY_CONTACTED, not_connected
 
@@ -176,6 +179,8 @@ class RapidResponseChip(BaseSkillChip):
     consensus_intents = {"raid_alert": "activate_rapid_response", "bail_request": "release_bail_funds"}
     # Who approves (Vera, 10-18): money and private info take two people (FINANCIAL, PII); the rest one.
     consensus_categories = {"activate_rapid_response": "EXTERNAL_COMMS", "release_bail_funds": "FINANCIAL"}
+    # A raid report reaches the on-call people at once; only the wide broadcast waits (Thomas, 2026-10-19).
+    consensus_oncall = {"activate_rapid_response": "raid"}
     consensus_unreachable = {
         "share_location_alert": (
             "advisory: safe_location returns a configured line, never addresses; its flag says this needs approval, "
@@ -215,6 +220,20 @@ class RapidResponseChip(BaseSkillChip):
             return (f"{not_connected('A bail fund', 'approving this will not move money or reach a coordinator')} "
                     f"{self._line('bail_fund', 'your local bail fund')}")
         return ""
+
+    def oncall_message(self, action: str, request: SkillRequest) -> str:
+        """What the on-call people are told: the kind, urgency and general area as reported, never the description,
+        which may hold an address or a name."""
+        try:
+            kind = AlertType(request.entities.get("type", "ice_raid")).value
+        except ValueError:
+            kind = AlertType.COMMUNITY_EMERGENCY.value
+        try:
+            urgency = UrgencyLevel(request.entities.get("urgency", "urgent")).value
+        except ValueError:
+            urgency = UrgencyLevel.URGENT.value
+        return (f"Raid report: {kind.replace('_', ' ')}, {urgency}. Area as reported: "
+                f"{general_area(request.entities.get('area'))}.")
 
     # Security notice included in relevant responses
     SECURITY_NOTICE = (
