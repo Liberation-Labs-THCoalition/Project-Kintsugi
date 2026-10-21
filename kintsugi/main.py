@@ -68,6 +68,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("consent sweep failed: %s", type(exc).__name__)
 
+    # On-call roster entries that can't work are named now, not at the first raid (Vera, 2026-10-20).
+    try:
+        from kintsugi.governance.oncall import roster_problems
+
+        for problem in roster_problems():
+            logger.warning("on-call roster: %s", problem)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("on-call roster check failed: %s", type(exc).__name__)
+
     # On-call alerts whose acknowledgement window closed while the server was down are escalated now, and then
     # checked every ONCALL_TICK_SECONDS (kintsugi/governance/oncall.py). A failed check is logged and retried next tick.
     async def _oncall_loop() -> None:

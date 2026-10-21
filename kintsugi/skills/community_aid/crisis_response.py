@@ -294,7 +294,7 @@ class CrisisResponseChip(BaseSkillChip):
             severity: Severity level (critical, high, medium, low)
             title: Brief title for the incident
             description: Detailed description
-            location: Affected area
+            location: Affected area (a neighbourhood or cross streets, not a home address); sent to on-call for a critical alert
             affected_population: Estimated number affected
         """
         severity = CrisisSeverity(request.entities.get("severity", "medium"))

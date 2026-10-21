@@ -306,3 +306,97 @@ def test_the_ack_route_lets_only_a_reached_on_call_person_acknowledge(people, me
     assert ok.status_code == 200 and ok.json()["state"] == "acknowledged" and "Acknowledged by alice" in ok.json()["status"]
     seen = client.get(f"/api/v1/oncall/{rec.id}", headers=people["carol"][1])
     assert seen.status_code == 200 and seen.json()["acknowledged_by"] == "alice"
+
+
+# ---- Vera's read (2026-10-20 19:11): a bounded retry when no admin is reached; the area switch; a loud roster -------
+
+def with_raiser():
+    return {**CONTACTS, "rita": [{"channel": "signal", "address": "+rita"}]}
+
+
+def test_no_admin_reached_is_retried_and_reached_on_the_third_try(people, messenger):
+    roster(["alice"], contacts=with_raiser())
+    rec = record(raid(people))
+    messenger.fail |= {"+carol", "+dave"}
+    t0 = at(rec, 0)
+    asyncio.run(oncall.tick(now=t0))                                       # try 1: nobody
+    assert oncall.get_alert("org_a", rec.id).next_admin_attempt == oncall._iso(t0 + timedelta(seconds=120))
+    assert asyncio.run(oncall.tick(now=t0 + timedelta(seconds=60))) == []  # not due: no try every tick
+    asyncio.run(oncall.tick(now=t0 + timedelta(seconds=120)))              # try 2: nobody
+    messenger.fail -= {"+carol", "+dave"}                                  # the service comes back
+    assert asyncio.run(oncall.tick(now=t0 + timedelta(seconds=300))) == []
+    asyncio.run(oncall.tick(now=t0 + timedelta(seconds=600)))              # try 3: reached
+    live = oncall.get_alert("org_a", rec.id)
+    assert live.admin_attempts == 3 and live.admins_reached == ["carol", "dave"] and live.final_note == ""
+    assert len(messenger.to("carol")) == 3 and len(messenger.to("dave")) == 3
+    assert asyncio.run(oncall.tick(now=t0 + timedelta(seconds=3600))) == []
+    assert len(messenger.to("carol")) == 3 and messenger.to("rita") == []
+    assert "every admin was asked (carol, dave reached)" in oncall.status_line(live)
+
+
+def test_no_admin_ever_reached_stops_after_four_tries_and_tells_the_raiser_once(people, messenger):
+    roster(["alice"], contacts=with_raiser())
+    rec = record(raid(people))
+    messenger.fail |= {"+carol", "+dave"}
+    t0 = at(rec, 0)
+    for seconds in (0, 60, 120, 300, 600, 900, 1800, 2400, 3600, 7200, 86400):
+        asyncio.run(oncall.tick(now=t0 + timedelta(seconds=seconds)))
+        if seconds == 900:
+            mid = oncall.get_alert("org_a", rec.id)
+            assert "no admin could be reached yet (try 3 of 4" in oncall.status_line(mid)
+    live = oncall.get_alert("org_a", rec.id)
+    assert len(messenger.to("carol")) == 4 and len(messenger.to("dave")) == 4    # exactly four, then silence
+    assert live.admin_attempts == 4 and live.next_admin_attempt == ""
+    assert live.final_note == "still no admin reached after 4 attempts"
+    assert len(messenger.to("rita")) == 1 and live.raiser_told and live.raiser_reached
+    assert "still no admin reached after 4 attempts" in messenger.to("rita")[0].lower()
+    assert "still no admin reached after 4 attempts" in oncall.status_line(live)
+
+
+def test_a_retry_stops_once_the_broadcast_request_is_decided(people, messenger):
+    roster(["alice"], contacts=with_raiser())
+    rec = record(raid(people))
+    messenger.fail |= {"+carol", "+dave"}
+    t0 = at(rec, 0)
+    asyncio.run(oncall.tick(now=t0))
+    get_consensus_gate().reject(rec.consent_id, f"key:{people['carol'][0].id}", "handled by phone", org_id="org_a")
+    asyncio.run(oncall.tick(now=t0 + timedelta(seconds=120)))
+    live = oncall.get_alert("org_a", rec.id)
+    assert len(messenger.to("carol")) == 1 and live.next_admin_attempt == ""
+    assert "rejected" in live.final_note and messenger.to("rita") == []
+    assert asyncio.run(oncall.tick(now=t0 + timedelta(seconds=1800))) == [] and len(messenger.to("carol")) == 1
+
+
+def test_a_deployment_can_withhold_the_area(people, messenger, monkeypatch):
+    monkeypatch.setattr(settings, "ONCALL_SEND_AREA", False)
+    roster(["alice"])
+    raid(people)
+    (text,) = messenger.to("alice")
+    assert "Eastside" not in text and "withheld" in text and "ice raid" in text
+
+
+def test_a_roster_that_cant_work_is_named_at_startup(people):
+    get_key_store().create("org_a", "admin", "nameless")                          # an admin key with no person
+    roster(["alice", "ghost"], contacts={"alice": CONTACTS["alice"], "carol": CONTACTS["carol"],
+                                         "stale": [{"channel": "signal", "address": "+stale"}]})
+    problems = "\n".join(oncall.roster_problems())
+    assert "'ghost' is in the on-call roster but has no live key" in problems
+    assert "'stale' is in the on-call roster but has no live key" in problems
+    assert "admin 'dave' has no contact" in problems
+    assert "'alice'" not in problems and "admin 'carol'" not in problems
+    assert "an admin key names no person" in problems
+    Path(settings.ONCALL_FILE).write_text("[not json")
+    assert ["can't be read" in p for p in oncall.roster_problems()] == [True]
+
+
+def test_a_try_in_progress_isnt_duplicated_until_its_claim_goes_stale(people, messenger):
+    roster(["alice"])
+    rec = record(raid(people))
+    t0 = at(rec, 0)
+    with oncall.get_alert_store().txn() as records:          # another worker claimed the escalation and is sending
+        live = records[rec.id]
+        live.state, live.escalated_at, live.admin_claimed_at = "escalated", oncall._iso(t0), oncall._iso(t0)
+    assert asyncio.run(oncall.tick(now=t0 + timedelta(seconds=oncall.STALE_CLAIM_SECONDS - 1))) == []
+    assert messenger.to("carol") == []
+    assert [r.id for r in asyncio.run(oncall.tick(now=t0 + timedelta(seconds=oncall.STALE_CLAIM_SECONDS)))] == [rec.id]
+    assert len(messenger.to("carol")) == 1

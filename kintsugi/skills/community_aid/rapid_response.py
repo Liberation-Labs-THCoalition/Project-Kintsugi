@@ -18,7 +18,8 @@ channels when possible.
 Intents handled:
 - raid_alert: Report ICE or police activity (the deployment's on-call people get it at once, if any are named and
   reachable; the wide broadcast is held for an admin's approval, and sends through an alert network once one is
-  connected)
+  connected). Entities: type, urgency, area (a neighbourhood or cross streets, not a home address), description (kept with the request, never sent to
+  on-call)
 - bail_request: Ask for bail fund support (held for two approvers; reaches a bail fund once one is connected)
 - legal_hotline: Give the deployment's legal hotline
 - safe_location: Point to the deployment's safe-location line (never addresses)

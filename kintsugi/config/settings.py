@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     ONCALL_FILE: str = "~/.kintsugi/oncall.json"
     # On-call alerts sent, acknowledged and escalated: kept on disk so a restart can't forget an escalation.
     ONCALL_ALERTS_FILE: str = "~/.kintsugi/oncall_alerts.json"
+    # Whether an on-call message carries the reported area. Off for a deployment whose messenger is a third party it
+    # wouldn't trust with a location (Vera, 2026-10-20).
+    ONCALL_SEND_AREA: bool = True
     # How often the server checks for on-call alerts whose acknowledgement window has closed.
     ONCALL_TICK_SECONDS: int = 30
     # Auth off is allowed only for local development: with it set, every request not from loopback is refused.

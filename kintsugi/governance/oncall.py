@@ -37,10 +37,20 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ACK_WINDOW_SECONDS = 300
 AREA_CHARS = 80     # an area line, not a narrative: longer text is cut, and the cut is marked
+# When an escalation reaches no admin, three more tries, at these offsets from the escalation, each recorded; then a
+# final record and the raiser told once (Vera, 2026-10-20: a 30-second messenger blip must not leave a raid unheard).
+ADMIN_RETRY_SECONDS = (120, 600, 1800)
+MAX_ADMIN_ATTEMPTS = 1 + len(ADMIN_RETRY_SECONDS)
+STALE_CLAIM_SECONDS = 300   # an admin attempt claimed this long ago and never recorded is taken as a crash, and retried
 
 
 def general_area(value) -> str:
-    """The reported area for an on-call message: trimmed to one line of AREA_CHARS, the cut marked, or "not given"."""
+    """The reported area for an on-call message: trimmed to one line of AREA_CHARS, the cut marked, or "not given".
+    A deployment whose messenger it wouldn't trust with a location turns settings.ONCALL_SEND_AREA off (Vera, 10-20)."""
+    from kintsugi.config.settings import settings
+
+    if not settings.ONCALL_SEND_AREA:
+        return "withheld (this deployment doesn't send locations)"
     text = " ".join(str(value or "").split())
     if not text:
         return "not given"
@@ -187,6 +197,12 @@ class AlertRecord:
     # None until the admins have been tried: a record left ESCALATED with None (a crash mid-escalation) is retried.
     admins_reached: list[str] | None = None
     admins_not_reached: dict[str, str] = field(default_factory=dict)
+    admin_attempts: int = 0             # tries at the admins, recorded one by one
+    admin_claimed_at: str = ""          # when the current try began; a stale one is retried
+    next_admin_attempt: str = ""        # when the next try is due, while no admin has been reached
+    final_note: str = ""                # set once the last try reached nobody
+    raiser_told: bool = False           # the raiser was sent the final note (once)
+    raiser_reached: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "AlertRecord":
@@ -284,35 +300,116 @@ def acknowledge(org_id: str, alert_id: str, person: str, now: datetime | None = 
 
 async def tick(now: datetime | None = None) -> list[AlertRecord]:
     """Escalate every unacknowledged alert whose window has closed: every admin the org can reach is asked to approve
-    the broadcast, all in the same tick. Also retries an escalation a crash left untried. Returns what it escalated."""
+    the broadcast, all in the same tick. When an escalation reaches no admin, try again at ADMIN_RETRY_SECONDS after
+    it (each try recorded, never every tick); after the last, record a final note and tell the raiser once. A try a
+    crash left unrecorded is retried. Returns what it tried."""
     now = now or datetime.now(timezone.utc)
     claimed: list[AlertRecord] = []
     with get_alert_store().txn() as records:
         for rec in records.values():
+            escalated = rec.state == AlertState.ESCALATED.value
             due = rec.state == AlertState.SENT.value and _when(rec.deadline) <= now
-            untried = rec.state == AlertState.ESCALATED.value and rec.admins_reached is None
+            crashed = (escalated and rec.admins_reached is None
+                       and (not rec.admin_claimed_at
+                            or _when(rec.admin_claimed_at) + timedelta(seconds=STALE_CLAIM_SECONDS) <= now))
+            retry = (escalated and rec.admins_reached == [] and bool(rec.next_admin_attempt)
+                     and _when(rec.next_admin_attempt) <= now)
             if due:
                 rec.state, rec.escalated_at = AlertState.ESCALATED.value, _iso(now)
-            if due or untried:
+            if due or crashed or retry:
+                rec.admins_reached, rec.admin_claimed_at = None, _iso(now)   # this try is claimed
                 claimed.append(AlertRecord.from_dict(asdict(rec)))
     done = []
     for rec in claimed:
         from kintsugi.governance.consensus import get_consensus_gate
 
-        try:
-            get_consensus_gate().escalate(rec.consent_id, org_id=rec.org_id)
-        except (KeyError, ValueError) as exc:  # decided, expired or gone: the admins still hear the alert went unanswered
-            logger.info("consent %s not escalated: %s", rec.consent_id, exc)
+        if rec.admin_attempts == 0:
+            try:
+                get_consensus_gate().escalate(rec.consent_id, org_id=rec.org_id)
+            except (KeyError, ValueError) as exc:  # decided, expired or gone: the admins still hear it went unanswered
+                logger.info("consent %s not escalated: %s", rec.consent_id, exc)
+        else:
+            # A retry asks the admins to approve: if the request was decided meanwhile, that would be false. Stop.
+            item = get_consensus_gate().get_item(rec.consent_id, org_id=rec.org_id)
+            status = item.status.value if item is not None else "gone"
+            if status not in ("PENDING", "ESCALATED"):
+                with get_alert_store().txn() as records:
+                    live = records[rec.id]
+                    live.admins_reached, live.admin_claimed_at, live.next_admin_attempt = [], "", ""
+                    live.final_note = f"the broadcast request is {status.lower()}, so no more tries"
+                    done.append(AlertRecord.from_dict(asdict(live)))
+                continue
         text = (f"{rec.message}\nNo on-call acknowledgement within {rec.ack_window_seconds // 60} minutes. The wide "
                 f"broadcast is waiting for an admin's approval (request {rec.consent_id}).")
         org_admins = admins(rec.org_id)
-        reached, missed = await reach(org_admins, load_roster(rec.org_id), set(org_admins), text)
+        roster = load_roster(rec.org_id)
+        reached, missed = await reach(org_admins, roster, set(org_admins), text)
+        attempt = rec.admin_attempts + 1
+        tell_raiser = False
         with get_alert_store().txn() as records:
             live = records[rec.id]
             live.admins_reached, live.admins_not_reached = reached, missed
+            live.admin_attempts, live.admin_claimed_at = attempt, ""
+            live.next_admin_attempt = ""
+            if not reached and attempt < MAX_ADMIN_ATTEMPTS:
+                live.next_admin_attempt = _iso(_when(live.escalated_at)
+                                               + timedelta(seconds=ADMIN_RETRY_SECONDS[attempt - 1]))
+            elif not reached:
+                live.final_note = f"still no admin reached after {attempt} attempts"
+                tell_raiser, live.raiser_told = not live.raiser_told, True
             done.append(AlertRecord.from_dict(asdict(live)))
-        logger.warning("on-call alert %s escalated: %d of %d admins reached", rec.id, len(reached), len(org_admins))
+        if tell_raiser:
+            raiser = _person_name(rec.triggered_by)
+            note = (f"{rec.message}\nStill no admin reached after {attempt} attempts: nobody has approved the wide "
+                    f"broadcast (request {rec.consent_id}). If people need help now, don't wait for it.")
+            told, _ = await reach([raiser] if raiser else [], roster, members(rec.org_id), note)
+            with get_alert_store().txn() as records:
+                records[rec.id].raiser_reached = bool(told)
+        logger.warning("on-call alert %s escalation try %d: %d of %d admins reached", rec.id, attempt, len(reached),
+                       len(org_admins))
     return done
+
+
+def _person_name(identity: str) -> str:
+    """The person behind an acting identity ("key:<id>"), or "" if the key names none."""
+    from kintsugi.security.api_keys import person_of
+
+    who = person_of(identity or "")
+    return who[len("person:"):] if who.startswith("person:") else ""
+
+
+def roster_problems() -> list[str]:
+    """Entries that can't work, named at startup so a missing set-person is found before a raid, not during one
+    (Vera, 2026-10-20): every on-call or contacts entry with no live key for that person in its org, every on-call
+    person with no contact, and every admin no escalation could reach. An unreadable roster is itself a problem."""
+    from kintsugi.config.settings import settings
+    from kintsugi.security.api_keys import get_key_store
+
+    path = Path(os.path.expanduser(settings.ONCALL_FILE))
+    if not path.exists():
+        return []
+    try:
+        orgs = sorted((json.loads(path.read_text() or "{}") or {}).keys())
+        rosters = {org: load_roster(org) for org in orgs}
+    except (ValueError, AttributeError) as exc:
+        return [f"the on-call roster {path} can't be read ({type(exc).__name__}): every alert will hold"]
+    problems = []
+    for org, roster in rosters.items():
+        live = members(org)
+        for person in sorted(set(roster.on_call) | set(roster.contacts)):
+            if person not in live:
+                problems.append(f"{org}: {person!r} is in the on-call roster but has no live key with that person")
+        for person in roster.on_call:
+            if person in live and not roster.contacts.get(person):
+                problems.append(f"{org}: on-call {person!r} has no contact, so no alert can reach them")
+        for person in admins(org):
+            if not roster.contacts.get(person):
+                problems.append(f"{org}: admin {person!r} has no contact, so no escalation can reach them")
+    unnamed = sorted({r.org_id for r in get_key_store().list()
+                      if r.org_id in rosters and r.role == "admin" and not r.revoked_at and not r.person})
+    for org in unnamed:
+        problems.append(f"{org}: an admin key names no person, so escalations can't reach its holder")
+    return problems
 
 
 def get_alert(org_id: str, alert_id: str) -> AlertRecord | None:
@@ -344,8 +441,13 @@ def status_line(rec: AlertRecord) -> str:
         elif rec.admins_reached:
             line += (f" No acknowledgement within {minutes} minutes: every admin was asked "
                      f"({', '.join(rec.admins_reached)} reached).")
+        elif rec.final_note:
+            line += f" No acknowledgement within {minutes} minutes, and {rec.final_note}."
         else:
-            line += f" No acknowledgement within {minutes} minutes, and no admin could be reached."
+            nxt = (f"; next try {_when(rec.next_admin_attempt).strftime('%H:%M')} UTC" if rec.next_admin_attempt
+                   else "")
+            line += (f" No acknowledgement within {minutes} minutes, and no admin could be reached yet (try "
+                     f"{rec.admin_attempts} of {MAX_ADMIN_ATTEMPTS}{nxt}).")
     return line
 
 
