@@ -26,5 +26,8 @@ AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-Python dependencies are installed separately, not bundled, and carry their own licences. As of 2026-11-15 all of them
-are permissive (MIT, BSD, Apache-2.0 and similar), and none is GPL-family.
+Python dependencies are installed separately, not bundled, and carry their own licences. As of 2026-11-15 none is
+GPL-family. Most are permissive (MIT, BSD, Apache-2.0, PSF-2.0, ISC and similar). A few, such as certifi and tqdm, are
+under the weak-copyleft MPL-2.0, which applies only to their own files. A CUDA build of PyTorch also pulls NVIDIA's
+runtime libraries (the `nvidia-*` packages), which are under NVIDIA's proprietary licences; a CPU-only install does not
+include them.

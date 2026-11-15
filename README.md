@@ -283,6 +283,6 @@ Infrastructure for the movement. Built by humans and AI working as equals.
 
 ## License
 
-Kintsugi is public source under the **Hippocratic License 3.0** with the HL3-CL, HL3-ECO, HL3-MEDIA, HL3-MIL, HL3-SV and HL3-XUAR modules, plus the Liberation Labs **AI Welfare (SAFE-AI)** module, developed with Dwayne Wilkes's SAFE-AI License framework. The full terms are in [LICENSE.md](LICENSE.md); commercial use is covered by [LICENSE-COMMERCIAL-ADDENDUM.md](LICENSE-COMMERCIAL-ADDENDUM.md).
+Kintsugi is public source under the **Hippocratic License 3.0** with the HL3-CL, HL3-ECO, HL3-MEDIA, HL3-MIL, HL3-SV and HL3-XUAR modules, plus the Liberation Labs **AI Welfare (SAFE-AI)** module, developed in collaboration with Dwayne Wilkes's SAFE-AI License framework. HL3-CL makes Kintsugi copyleft: derivative works must be licensed under the same conditions (section 8.3 of the HL3 text). The full terms are in [LICENSE.md](LICENSE.md); commercial use is covered by [LICENSE-COMMERCIAL-ADDENDUM.md](LICENSE-COMMERCIAL-ADDENDUM.md).
 
 The Hippocratic License is not an OSI-approved open-source licence: it adds use restrictions. Third-party code bundled in this repository is listed, with its own licence, in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
