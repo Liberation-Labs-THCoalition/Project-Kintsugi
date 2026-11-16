@@ -17,7 +17,8 @@ with the following optional modules enabled:
 - **HL3-XUAR** (Xinjiang Uygur Autonomous Region): not licensed to anyone who does business in, purchases goods from,
   or otherwise benefits from goods produced in the Xinjiang Uygur Autonomous Region
 
-These are short summaries; each module's text on firstdonoharm.dev (Version 3.0, October 2021) is what applies. Worker
+These are short summaries; what applies is the combined licence text with these six modules, Version 3.0, October
+2021 (linked under Full License Text below). Worker
 protections, such as the right to organize and freedom from forced labour, are in the Hippocratic License core itself,
 not in a module.
 
@@ -74,15 +75,15 @@ You may use, modify, and distribute this software provided that:
 2. Any persistent agents created with this software are treated in 
    accordance with the AI Welfare requirements above
 3. You include this license in any redistribution
-4. You do not use the software for purposes prohibited by the enabled modules
+4. You are not excluded by the enabled modules, and you don't use the software in ways they forbid
 
 ## Full License Text
 
-The complete Hippocratic License 3.0 text is available at:
-https://firstdonoharm.dev/version/3/0/hl3.txt
+The complete Hippocratic License 3.0 text with exactly the six modules above is available at:
+https://firstdonoharm.dev/version/3/0/cl-eco-media-mil-sv-xuar.txt
 
-This license incorporates that text by reference with the modules 
-specified above.
+This license incorporates that text by reference. (The core alone, without modules, is at
+https://firstdonoharm.dev/version/3/0/hl3.txt.)
 
 ---
 
