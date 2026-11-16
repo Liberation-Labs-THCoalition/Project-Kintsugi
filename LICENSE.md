@@ -5,12 +5,21 @@
 This license is based on the [Hippocratic License 3.0](https://firstdonoharm.dev/) 
 with the following optional modules enabled:
 
-- **HL3-CL**: No use in violation of labor rights
-- **HL3-ECO**: No use causing environmental destruction  
-- **HL3-MEDIA**: No use in disinformation or manipulative media
-- **HL3-MIL**: No military or weapons use
-- **HL3-SV**: No surveillance use
-- **HL3-XUAR**: No use facilitating human rights abuses
+- **HL3-CL** (Copyleft, section 8.3): modified software, source code or other derivative work must be licensed, in
+  its entirety, under the exact same conditions as this License
+- **HL3-ECO** (Ecocide): no use to commit ecocide, meaning unlawful or wanton acts committed with knowledge of a
+  substantial likelihood of severe and either widespread or long-term damage to the environment
+- **HL3-MEDIA** (Media): not licensed to anyone who broadcasts messages promoting killing, torture or other forms of
+  extreme violence
+- **HL3-MIL** (Military Activities): not licensed to an entity that conducts military activities
+- **HL3-SV** (Mass Surveillance): not licensed to a government agency or multinational corporation that participates
+  in mass surveillance programs
+- **HL3-XUAR** (Xinjiang Uygur Autonomous Region): not licensed to anyone who does business in, purchases goods from,
+  or otherwise benefits from goods produced in the Xinjiang Uygur Autonomous Region
+
+These are short summaries; each module's text on firstdonoharm.dev (Version 3.0, October 2021) is what applies. Worker
+protections, such as the right to organize and freedom from forced labour, are in the Hippocratic License core itself,
+not in a module.
 
 ## Additional Module: AI Welfare (SAFE-AI)
 
