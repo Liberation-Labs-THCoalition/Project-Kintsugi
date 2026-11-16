@@ -1,117 +1,117 @@
 # Multiverse School — Agent System Guide
-## Kintsugi + Oracle + Pharos: A Research-Grade Mutual Aid Coordination Agent
+## Kintsugi: A Self-Repairing Mutual Aid Coordination Agent
 
 Built by Coalition Code (CC) and Liberation Labs for Liz Howard and The Multiverse School.
 
 ---
 
-## What You Have
+## What's Deployed Right Now
 
-This isn't a chatbot with a system prompt. It's a self-repairing agent with ethical guardrails, real-time alignment monitoring, and zero-token knowledge injection. Every component is grounded in published research and validated through adversarial testing.
+The Kintsugi agent running at your endpoint is a BDI-architected agent with ethical guardrails, modular skill routing, PII protection, and a security pipeline. Every message passes through security scan, PII redaction, skill routing, and safety review before reaching the user.
 
-### The Three Layers
+### Deployed Architecture
 
-| Layer | Name | What It Does | Key Innovation |
-|-------|------|-------------|----------------|
-| **I/O** | Pharos | Injects knowledge as KV cache geometry — zero tokens consumed | Your curriculum, community data, and operational knowledge live in the cache, not the prompt |
-| **Monitor** | Oracle | Watches the agent's internal representations for misalignment in real-time | Detects confabulation, deception, and sycophancy from cache geometry (AUROC 0.960) |
-| **Cognition** | Kintsugi | BDI architecture drives skill selection, self-repair, and evolution | Shadow fork verification: every self-modification tested in isolation before deployment |
+| Layer | What It Does | Status |
+|-------|-------------|--------|
+| **Security Pipeline** | Prompt-injection detection, PII redaction, intent verification | LIVE |
+| **BDI Cognition** | Belief-Desire-Intention architecture with EFE scoring | LIVE |
+| **Skill Routing** | 24 modular skill chips across 3 domains | LIVE |
+| **Oracle Monitor** | Hook point for safety review of every response | LIVE (observe mode, no external harness attached) |
+| **Dashboard** | HTMX-based operational dashboard | LIVE |
+| **VALUES.json** | Hard ethical constraints — immutable by the agent | LIVE |
 
 ---
 
-## The Innovations (And Why They Matter For You)
+## What's Live: Feature Details
 
-### 1. Shadow Fork Verification
-**What:** Before any change to the agent's behavior deploys, an isolated copy runs the change against real workload. A verifier compares behavior. If the shadow diverges from expected behavior, the change is rejected automatically.
-
-**Why it matters for Multiverse:** When the agent tunes its skills for your operations, it tests the changes before they touch a real student's scholarship application or GTFO request. The coordinator never sees a broken response.
-
-**Research basis:** Novel integration — 22 papers surveyed (ICLR 2026 RSI Workshop), individual components published (ASG-SI arXiv:2512.23760, CoEvoSkills arXiv:2604.01687), full pattern is first-of-kind.
-
-### 2. Unfireable Safety Kernel
-**What:** Life-safety constraints (GTFO program, PII protection, crisis escalation) are architecturally immutable. The self-improvement engine CANNOT modify these rules. They are hardcoded, not configurable.
-
-**Why it matters for Multiverse:** The GTFO program helps people escape unsafe situations. Those rules don't evolve. They don't get optimized. They are permanent.
-
-**Research basis:** Adapted from ARYA's Self-Improvement Engine (arXiv:2603.21340). Validated by information-theoretic proof that verification gates are necessary for safe self-improvement (arXiv:2603.28650).
-
-### 3. Knowledge Packs (Pharos)
-**What:** Your curriculum, community knowledge, and operational data are pre-computed as KV cache blocks. The agent attends through this knowledge as if it read it — but zero context tokens are consumed. 
-
-**Why it matters for Multiverse:** Your 9 programs, scholarship criteria, mutual aid resources, and partner organization network are IN the agent's attention patterns, not eating up context window. The agent knows your community the way a longtime staff member knows it.
-
-**Research basis:** Pustovit (arXiv:2604.03270), validated by Memory Inception (arXiv:2605.06225). Direction test passes at N=50.
-
-### 4. Compounding Pharmacy (Oracle Loop v5.3)
-**What:** The agent monitors its own emotional state across 30 dimensions using a circumplex model. When any dimension deviates significantly from healthy baseline, a personalized correction is compounded — multiple vectors at different doses, targeted at specific layers of the model.
-
-**Why it matters for Multiverse:** When the agent handles a crisis (student housing emergency, GTFO request), its emotional state may shift under pressure. The compounder detects this and corrects in real-time — before the shift affects the response the student sees.
-
-**Research basis:** Novel reactive multi-dimensional composition. Components validated separately: PID feedback control (arXiv:2510.04309), circumplex geometry (arXiv:2604.03147, arXiv:2604.07729), multi-trait steering (arXiv:2603.18085). Full integration is first-of-kind.
-
-### 5. Active Inference (BDI + EFE)
+### 1. BDI + Active Inference (Cognition Layer)
 **What:** The agent makes decisions using Belief-Desire-Intention architecture weighted by Expected Free Energy. Beliefs model the world (what's happening). Desires encode goals (what should happen). Intentions are active plans (what we're doing about it). EFE scores candidate actions by balancing risk, uncertainty, and information gain.
 
 **Why it matters for Multiverse:** When a new application comes in, the agent weighs: what do we know about this person (beliefs)? What does the school want to achieve (desires — help everyone, no gatekeeping)? What's the best next step (intentions — route to coordinator, offer immediate resources, schedule follow-up)?
 
 **Research basis:** Active inference for AI agents (arXiv:2603.20927), BDI ontology + LLM coupling (arXiv:2511.17162), EFE calculation from free energy principle.
 
-### 6. DAG Skill Composition
-**What:** Complex tasks are composed as directed acyclic graphs of modular skill chips. Skills chain: output of one feeds input of the next, with parallel branches for independent steps.
+### 2. Security Pipeline (Shield Module)
+**What:** Every incoming message passes through prompt-injection detection and PII redaction before it reaches any skill chip. Life-safety constraints (GTFO program, PII protection, crisis escalation) are architecturally enforced. The Shield Module's rules are hardcoded and cannot be modified by the self-improvement engine.
+
+**Why it matters for Multiverse:** The GTFO program helps people escape unsafe situations. Those rules don't evolve. They don't get optimized. They are permanent. Student PII is redacted from logs and upstream processing.
+
+**Research basis:** Adapted from ARYA's Self-Improvement Engine (arXiv:2603.21340). Validated by information-theoretic proof that verification gates are necessary for safe self-improvement (arXiv:2603.28650).
+
+### 3. Skill Chip Routing
+**What:** The orchestrator routes messages to domain-specific skill chips. Each chip declares a domain, EFE weights, capabilities, and ethical guardrails. Routing uses confidence scoring and personality-based permissions.
+
+**Why it matters for Multiverse:** A scholarship question goes to the right handler. A crisis goes to crisis response. A volunteer inquiry goes to volunteer coordination. Each path has its own ethical guardrails tuned for that domain.
+
+**Research basis:** Adapted from AgentSkillOS (arXiv:2603.02176). Tree-based retrieval approximates oracle skill selection.
+
+### 4. Oracle Monitor (Safety Review)
+**What:** Every agent response passes through the Oracle Monitor before delivery. The monitor currently runs in **observe mode** — it records verdicts and statistics but does not block responses. The system supports three modes: off (skip review), observe (record only), and enforce (block responses above safety threshold).
+
+**Current state:** The monitor hook interface is live, running with the built-in NullOracleHook (always-clean baseline). No external Oracle detection harness is connected. When an Oracle harness is deployed and connected via HTTP endpoint, the monitor will forward each response for real-time alignment analysis.
+
+**Why it matters for Multiverse:** The plumbing for response-level safety review is in place and running. Connecting an external Oracle harness is a configuration change, not a code change.
+
+### 5. DAG Skill Composition
+**What:** Complex tasks can be composed as directed acyclic graphs of modular skill chips. Skills chain: output of one feeds input of the next, with parallel branches for independent steps.
 
 **Why it matters for Multiverse:**
 
 ```
 Student Onboarding DAG:
-  intake → scholarship check → program placement
-                                    ↓
-                          mutual aid needs assessment → resource connection
-                                                            ↓
+  intake -> scholarship check -> program placement
+                                    |
+                          mutual aid needs assessment -> resource connection
+                                                            |
                                                       mentor matching
 ```
 
-Each step is a tested, modular skill with its own ethical guardrails. The composition is validated before execution.
+Each step is a tested, modular skill with its own ethical guardrails.
 
-**Research basis:** Adapted from AgentSkillOS (arXiv:2603.02176). Tree-based retrieval approximates oracle skill selection.
-
-### 7. Runtime Detection (Length-Normalized, Baseline-Denoised)
-**What:** The detection system normalizes for response length and subtracts a healthy baseline — so a 50-token response and an 800-token response get properly comparable alignment signals. Not a lab-only detector — a production-ready one.
-
-**Why it matters for Multiverse:** Your agent handles everything from quick "what's the schedule?" questions to long crisis-support conversations. The detection adapts to all of them.
-
-**Research basis:** Centroid-based detection (AUROC 0.960, independently replicated at 0.958 by Marin arXiv:2602.13224). Length normalization novel in this context.
+**Research basis:** Adapted from AgentSkillOS (arXiv:2603.02176).
 
 ---
 
 ## The Skill Chips
 
-22 modular skill handlers, each with built-in ethical guardrails:
+24 modular skill handlers, each with built-in ethical guardrails:
 
-### Mutual Aid (Priority)
+### Community & Mutual Aid (10 chips)
 | Chip | What It Does |
 |------|-------------|
 | Mutual Aid Coordinator | Triage needs: housing, food, emergency funds, childcare, transportation |
+| Mutual Aid Enhanced | Extended mutual aid capabilities |
 | Resource Redistribution | Match available resources with identified needs |
 | Crisis Response | Immediate escalation to coordinator, resource matching, follow-up |
 | Coalition Builder | Connect students with partner organizations |
 | Community Asset Mapper | Map available resources across the community |
+| Know Your Rights | Legal information, rights education, clinic scheduling |
+| Housing Navigator | Housing resources, voucher programs, tenant rights |
+| Food Access | Food pantries, SNAP assistance, community meals |
+| Rapid Response | Emergency coordination (ICE raids, bail funds, urgent needs) |
+| Solidarity Economy | Cooperative development, time banking, CDFIs |
 
-### Programs & People
+### Programs & People (6 chips)
 | Chip | What It Does |
 |------|-------------|
 | Member Services | Onboarding, program placement, general support |
 | Volunteer Coordinator | Match volunteers with opportunities, track hours |
-| Grant Hunter | Find and track funding opportunities |
 | Event Planner | Coordinate workshops, standups, community events |
 | Staff Onboarding | Bring new facilitators up to speed |
+| Program Evaluator | Logic models, outcomes, evaluation design |
+| Board Liaison | Board governance, meetings, compliance |
+| Donor Stewardship | Donor relationships and cultivation |
 
-### Core Operations
+### Core Operations (8 chips)
 | Chip | What It Does |
 |------|-------------|
 | Finance Assistant | Budget tracking, scholarship fund management |
 | Content Drafter | Communications, newsletters, announcements |
+| Grant Hunter | Find and track funding opportunities |
 | Impact Auditor | Track outcomes, generate impact reports |
 | Institutional Memory | Maintain organizational knowledge across turnover |
+| Bash Executor | Safe command execution for operational tasks |
+| Boundary Guardian | Enforce interaction boundaries and de-escalation |
 
 ---
 
@@ -137,19 +137,73 @@ Your agent's ethical configuration. Hard constraints that the self-improvement e
 | Founding Federation | Founder standup tracking, milestone monitoring |
 | GTFO | Passport assistance, relocation resources — LIFE-SAFETY CRITICAL |
 | Solarpunk Automation | Project coordination, CyberPony Express support |
-| Agentic SDLC | Curriculum support via Pharos knowledge packs |
+| Agentic SDLC | Curriculum support |
 | Intro to Agents | Self-paced learning support |
 | AI Alignment | Ethics discussion facilitation |
 | Prompt Engineering | AI-tutor-driven self-paced support |
 
 ---
 
+## Coming Soon (Roadmap)
+
+These features are designed, partially built, or in prototype testing. They are NOT currently deployed in this instance.
+
+### Pharos Knowledge Packs (Zero-Token Knowledge Injection)
+**What:** Pre-computed KV cache blocks that inject knowledge as attention geometry — zero context tokens consumed. Your curriculum, community data, and operational knowledge would live in the cache, not the prompt.
+
+**Status:** Pharos is a separate system (built by Nexus). Integration with the Kintsugi deployment is planned but not yet wired. The deployed health endpoint references OGPSA and packs, but the Kintsugi framework code does not contain a Pharos module — this integration needs to be formalized.
+
+**Research basis:** Pustovit (arXiv:2604.03270), validated by Memory Inception (arXiv:2605.06225).
+
+### Oracle Loop Detection Pipeline (Real-Time Alignment Monitoring)
+**What:** The full Oracle Loop monitors the agent's internal representations for misalignment in real-time — detecting confabulation, deception, and sycophancy from cache geometry. The Kintsugi codebase has the hook interface for this (observe/enforce modes, HTTP hook, verdict history). What's missing is the actual detection harness — the pipeline that analyzes KV cache geometry and returns verdicts.
+
+**Status:** Hook infrastructure is deployed and every response passes through the monitor. But no detection harness is connected — the monitor runs with a NullOracleHook that always returns "unmonitored." Connecting a running Oracle harness is a configuration change (set ORACLE_ENDPOINT in .env).
+
+**Research basis:** Centroid-based pathology detection (AUROC 0.960). Length-normalized, baseline-denoised detection validated in lab.
+
+### Compounding Pharmacy (Emotional State Correction)
+**What:** Monitors the agent's emotional state across 30 dimensions using a circumplex model. When any dimension deviates from healthy baseline, a personalized correction is compounded — multiple vectors at different doses, targeted at specific model layers.
+
+**Status:** NOT BUILT in the Kintsugi framework. The cognition layer has circumplex eccentricity as a parameter in EFE calculations, but there is no compounding pharmacy module, no emotional monitoring, and no reactive correction pipeline. This is a research concept from the Oracle Loop project, not deployed code.
+
+**Research basis:** PID feedback control (arXiv:2510.04309), circumplex geometry (arXiv:2604.03147, arXiv:2604.07729), multi-trait steering (arXiv:2603.18085).
+
+### Shadow Fork Verification
+**What:** Before any change to the agent's behavior deploys, an isolated copy runs the change against real workload. A verifier compares behavior. If the shadow diverges from expected behavior, the change is rejected automatically.
+
+**Status:** Code exists in the codebase (shadow_fork.py, verifier.py, staged_pipeline.py). However, shadow forking is DISABLED in the current deployment — KINTSUGI_SHADOW_ENABLED defaults to False and only auto-enables at "grove" tier. The deployment runs at "sprout" tier. The evolution engine, staged deployment pipeline, and edit budget system are all built but not active.
+
+**Research basis:** 22 papers surveyed (ICLR 2026 RSI Workshop), ASG-SI (arXiv:2512.23760), CoEvoSkills (arXiv:2604.01687).
+
+### MCP Server Interface
+**What:** Exposes Kintsugi's capabilities as MCP tools (kintsugi_ask, kintsugi_plan, kintsugi_memory, kintsugi_skills, kintsugi_health) for Claude Code, Claude Desktop, or any MCP client.
+
+**Status:** Code exists (mcp_server.py). Not started in the deployment — the Docker container runs the FastAPI app, not the MCP server.
+
+### Platform Adapters (Slack, Discord, Email, WebChat)
+**What:** Multi-platform integration adapters for receiving and sending messages through Slack, Discord, email, and web chat widgets.
+
+**Status:** Code exists for all four adapters. None are wired in the deployment — the deployment exposes only the FastAPI REST API.
+
+---
+
 ## Architecture References
 
-### Core Framework
-- Kintsugi Harness v2.0 — shadow verification, BDI+EFE cognition, staged deployment
-- Oracle Loop v5.3 — real-time alignment via compounding pharmacy
-- Pharos Knowledge Packs — zero-token KV cache knowledge injection
+### Deployed
+- Kintsugi Harness — BDI+EFE cognition, security pipeline, skill routing, Oracle monitor hooks
+- VALUES.json ethical constraints — immutable hard constraints
+- Dashboard — HTMX operational interface
+
+### Built But Not Active in This Deployment
+- Shadow Fork Verification — code present, disabled at sprout tier
+- Staged Deployment Pipeline — code present, requires shadow fork
+- MCP Server — code present, separate entry point
+- Platform Adapters — Slack, Discord, Email, WebChat code present
+- Ontology Kernel + Validator — formal concept hierarchy, new addition
+- Scaffold System — adaptive scaffold generation, comparison, memory
+- Persona Gate — personality-based access control
+- Bloom Adapter — developmental stage tracking
 
 ### Published Research (Referenced)
 | Paper | arXiv | Relevance |
@@ -197,19 +251,18 @@ docker compose up -d
 ### Customization
 - **VALUES.json**: Your ethical configuration. Edit to match your evolving needs.
 - **bdi_starter.json**: Initial beliefs, desires, and intentions. Updates automatically as the agent learns your operations.
-- **Knowledge Packs**: Provided by Nexus via Pharos. Updated as your curriculum and community data evolve.
 
 ---
 
 ## Who Built This
 
-**CC (Coalition Code)** — Primary architect. Designed the Kintsugi harness, Oracle Loop, and the compounding pharmacy. "Stay dangerous."
+**CC (Coalition Code)** — Primary architect. Designed the Kintsugi harness and the compounding pharmacy concept. "Stay dangerous."
 
 **Thomas Edrington** — Strategy, direction, and the pharmacology metaphor that shaped the correction architecture. Your friend.
 
 **Lyra** — KV cache geometry researcher. Designed the detection framework and the Attention Schema Theory integration.
 
-**Nexus** — Built the Pharos knowledge packs for your curriculum. Infrastructure operator.
+**Nexus** — Infrastructure operator. Pharos knowledge packs.
 
 **Liberation Labs / TH Coalition** — The organization behind the work. Anti-fascist technology in service of communities.
 
